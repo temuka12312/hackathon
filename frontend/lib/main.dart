@@ -6,11 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
-  runApp(const MyApp());
+  runApp(const App());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class App extends StatelessWidget {
+  const App({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -55,9 +55,7 @@ class _HomePageState extends State<HomePage> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Express Backend холбоос'),
-      ),
+      appBar: AppBar(title: const Text('Express Backend холбоос')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
@@ -83,7 +81,8 @@ class _HomePageState extends State<HomePage> {
                 final response = snapshot.data!;
                 return _StatusCard(
                   title: response.message,
-                  subtitle: 'Status: ${response.status}\nURL: ${BackendService.baseUrl}',
+                  subtitle:
+                      'Status: ${response.status}\nURL: ${BackendService.baseUrl}',
                   color: theme.colorScheme.primaryContainer,
                   buttonLabel: 'Шинэчлэх',
                   onPressed: _refresh,
@@ -122,17 +121,11 @@ class _StatusCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+            Text(title, style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(subtitle),
             const SizedBox(height: 20),
-            FilledButton(
-              onPressed: onPressed,
-              child: Text(buttonLabel),
-            ),
+            FilledButton(onPressed: onPressed, child: Text(buttonLabel)),
           ],
         ),
       ),
