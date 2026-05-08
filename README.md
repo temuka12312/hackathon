@@ -35,7 +35,7 @@ Backend now exposes:
 
 - `POST /api/auth/register`
 
-Request body:
+Request n:
 
 ```json
 {
