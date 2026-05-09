@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../models/backend_response.dart';
-import '../models/register_response.dart';
+import '../models/auth_response.dart';
 import 'api_client.dart';
 
 class BackendService {
@@ -11,19 +10,7 @@ class BackendService {
 
   static String get baseUrl => ApiClient.baseUrl;
 
-  static Future<BackendResponse> fetchHealth() async {
-    final uri = Uri.parse('$baseUrl/api/health');
-    final response = await http.get(uri);
-
-    if (response.statusCode != 200) {
-      throw Exception('Backend returned ${response.statusCode}');
-    }
-
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    return BackendResponse.fromJson(json);
-  }
-
-  static Future<RegisterResponse> registerUser({
+  static Future<AuthResponse> registerUser({
     required String name,
     required String email,
     required String password,
@@ -41,6 +28,28 @@ class BackendService {
       throw Exception(json['message'] as String? ?? 'Бүртгэл амжилтгүй.');
     }
 
-    return RegisterResponse.fromJson(json);
+    return AuthResponse.fromJson(json);
+  }
+
+  static Future<AuthResponse> loginUser({
+    required String email,
+    required String password,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/auth/login');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'password': password}),
+    );
+
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        json['message'] as String? ?? 'Нэвтрэх үед алдаа гарлаа.',
+      );
+    }
+
+    return AuthResponse.fromJson(json);
   }
 }
