@@ -311,11 +311,7 @@ class BackendService {
     final response = await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': name,
-        'email': email,
-        'password': password,
-      }),
+      body: jsonEncode({'name': name, 'email': email, 'password': password}),
     );
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -349,9 +345,7 @@ class BackendResponse {
 }
 
 class RegisterResponse {
-  const RegisterResponse({
-    required this.message,
-  });
+  const RegisterResponse({required this.message});
 
   factory RegisterResponse.fromJson(Map<String, dynamic> json) {
     return RegisterResponse(
