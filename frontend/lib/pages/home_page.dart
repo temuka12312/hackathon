@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-
-import '../api/backend_service.dart';
-import '../components/registration_form.dart';
-import '../components/status_card.dart';
-import '../models/backend_response.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -13,133 +11,189 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  static const LatLng _defaultLocation = LatLng(47.9184, 106.9177);
 
-  late Future<BackendResponse> _backendResponse;
-  bool _isSubmitting = false;
-  String? _registerMessage;
-  bool _registerSucceeded = false;
+  final MapController _mapController = MapController();
+  LatLng currentLocation = _defaultLocation;
+  String? locationError;
 
   @override
   void initState() {
     super.initState();
-    _backendResponse = BackendService.fetchHealth();
+    getCurrentLocation();
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
+  Future<void> getCurrentLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
-  Future<void> _refresh() async {
-    final nextResponse = BackendService.fetchHealth();
-    setState(() {
-      _backendResponse = nextResponse;
-    });
-    await nextResponse;
-  }
-
-  Future<void> _register() async {
-    final form = _formKey.currentState;
-    if (form == null || !form.validate()) {
+    if (!serviceEnabled) {
+      setState(() {
+        locationError = 'Location service унтраалттай байна.';
+      });
       return;
     }
 
-    setState(() {
-      _isSubmitting = true;
-      _registerMessage = null;
-      _registerSucceeded = false;
-    });
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      setState(() {
+        locationError = 'Location permission зөвшөөрөөгүй байна.';
+      });
+      return;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      setState(() {
+        locationError =
+            'Location permission бүрмөсөн хаалттай байна. Settings-ээс зөвшөөрнө үү.';
+      });
+      return;
+    }
 
     try {
-      final result = await BackendService.registerUser(
-        name: _nameController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
+      final position = await Geolocator.getCurrentPosition();
+      final nextLocation = LatLng(position.latitude, position.longitude);
+
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
-        _registerSucceeded = true;
-        _registerMessage = result.message;
+        currentLocation = nextLocation;
+        locationError = null;
       });
 
-      _passwordController.clear();
-    } catch (error) {
-      setState(() {
-        _registerMessage = error.toString().replaceFirst('Exception: ', '');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _mapController.move(nextLocation, 15);
+        }
       });
-    } finally {
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
-        _isSubmitting = false;
+        locationError = 'Таны байршлыг авч чадсангүй.';
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Хэрэглэгч бүртгэл')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                FutureBuilder<BackendResponse>(
-                  future: _backendResponse,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 40),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: currentLocation,
+              initialZoom: 15,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.ub_smartride',
+              ),
 
-                    if (snapshot.hasError) {
-                      return StatusCard(
-                        title: 'Backend холболт амжилтгүй',
-                        subtitle: snapshot.error.toString(),
-                        color: theme.colorScheme.errorContainer,
-                        buttonLabel: 'Дахин оролдох',
-                        onPressed: _refresh,
-                      );
-                    }
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: currentLocation,
+                    width: 80,
+                    height: 80,
+                    child: const Icon(
+                      Icons.location_pin,
+                      color: Colors.red,
+                      size: 40,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
 
-                    final response = snapshot.data!;
-                    return StatusCard(
-                      title: response.message,
-                      subtitle:
-                          'Status: ${response.status}\nURL: ${BackendService.baseUrl}',
-                      color: theme.colorScheme.primaryContainer,
-                      buttonLabel: 'Шинэчлэх',
-                      onPressed: _refresh,
-                    );
-                  },
-                ),
-                const SizedBox(height: 24),
-                RegistrationForm(
-                  formKey: _formKey,
-                  nameController: _nameController,
-                  emailController: _emailController,
-                  passwordController: _passwordController,
-                  isSubmitting: _isSubmitting,
-                  onSubmit: _register,
-                  message: _registerMessage,
-                  succeeded: _registerSucceeded,
-                ),
-              ],
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const TextField(
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        hintText: 'Хаашаа явах вэ?',
+                        icon: Icon(Icons.search),
+                      ),
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  if (locationError != null)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        locationError!,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+
+                  SizedBox(
+                    height: 110,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        actionButton(Icons.local_taxi, 'Такси', Colors.amber),
+                        actionButton(Icons.people, 'Shared Ride', Colors.blue),
+                        actionButton(Icons.shield, 'Safe Route', Colors.green),
+                        actionButton(Icons.sos, 'SOS', Colors.red),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget actionButton(IconData icon, String label, Color color) {
+    return Container(
+      width: 120,
+      margin: const EdgeInsets.only(right: 12),
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.grey.shade900,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+        ),
+        onPressed: () {},
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 10),
+            Text(label),
+          ],
         ),
       ),
     );
