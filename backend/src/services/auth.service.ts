@@ -1,5 +1,5 @@
 import { AuthUser } from "../models/AuthUser";
-import { hashPassword } from "../utils/password";
+import { hashPassword, verifyPassword } from "../utils/password";
 
 type RegisterUserInput = {
   name: string;
@@ -64,6 +64,48 @@ export const registerUser = async ({
     status: 201,
     body: {
       message: "Хэрэглэгч амжилттай бүртгэгдлээ.",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      },
+    },
+  };
+};
+
+type LoginUserInput = {
+  email: string;
+  password: string;
+};
+
+export const loginUser = async ({ email, password }: LoginUserInput) => {
+  const normalizedEmail = String(email ?? "").trim().toLowerCase();
+  const normalizedPassword = String(password ?? "");
+
+  if (!normalizedEmail || !normalizedPassword) {
+    return {
+      status: 400,
+      body: {
+        message: "Имэйл болон нууц үг шаардлагатай.",
+      },
+    };
+  }
+
+  const user = await AuthUser.findOne({ email: normalizedEmail });
+
+  if (!user || !verifyPassword(normalizedPassword, user.passwordHash)) {
+    return {
+      status: 401,
+      body: {
+        message: "Имэйл эсвэл нууц үг буруу байна.",
+      },
+    };
+  }
+
+  return {
+    status: 200,
+    body: {
+      message: "Тавтай морил.",
       user: {
         id: user._id,
         name: user.name,

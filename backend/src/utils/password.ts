@@ -12,3 +12,20 @@ export const hashPassword = (password: string) => {
 
   return `${salt}:${hash}`;
 };
+
+export const verifyPassword = (password: string, storedHash: string) => {
+  const [salt, originalHash] = storedHash.split(":");
+
+  if (!salt || !originalHash) {
+    return false;
+  }
+
+  const derivedHash = crypto
+    .pbkdf2Sync(password, salt, HASH_ITERATIONS, KEY_LENGTH, DIGEST)
+    .toString("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(derivedHash, "hex"),
+    Buffer.from(originalHash, "hex"),
+  );
+};
