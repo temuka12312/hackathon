@@ -107,7 +107,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _setDestination(LatLng dest) async {
-    if (_isBusy) return; // drop rapid taps
+    if (_isBusy) return;
     _isBusy = true;
     try {
       await _stopRecording();
@@ -117,14 +117,14 @@ class _HomePageState extends State<HomePage> {
         _isNavLoading = true;
       });
       try {
-        final points = await RoutingService.fetchRoute(
+        final points = await RoutingService.fetchRoutes(
           start: _location,
           end: dest,
           profile: _osrmProfile(),
         );
         if (!mounted) return;
         setState(() {
-          _navRoutePoints = points;
+          _navRoutePoints = points.cast<LatLng>();
           _isNavLoading = false;
         });
       } catch (_) {
@@ -184,8 +184,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _stopRecording() async {
-    if (!_isRecording && _gpsSub == null) return; // already stopped — no-op
-    // Capture and clear immediately to prevent re-entry from stream callbacks
+    if (!_isRecording && _gpsSub == null) return;
     final sub = _gpsSub;
     final wasRecording = _isRecording;
     final points = List<LatLng>.from(_recordedPoints);
@@ -245,9 +244,8 @@ class _HomePageState extends State<HomePage> {
             ),
             children: [
               TileLayer(
-                urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.ubcab.app',
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.frontend',
               ),
               // Community routes — precomputed, zero allocation in build()
               if (_communityPolylines.isNotEmpty)
@@ -280,7 +278,7 @@ class _HomePageState extends State<HomePage> {
                     point: _location,
                     width: 36,
                     height: 36,
-                    child: const _LocationDot(), // own AnimationController
+                    child: const _LocationDot(),
                   ),
                   if (_destination != null)
                     Marker(
@@ -328,10 +326,10 @@ class _HomePageState extends State<HomePage> {
             child: SafeArea(
               bottom: false,
               child: Column(
-                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildTopBar(),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   _buildSearchBar(context),
                 ],
               ),
@@ -528,7 +526,7 @@ class _HomePageState extends State<HomePage> {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -583,7 +581,6 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 14),
               if (_destination != null && _isRecording)
-                // ── Trip in progress ─────────────────────────────────────
                 FilledButton(
                   onPressed: _stopRecording,
                   style: FilledButton.styleFrom(
@@ -610,7 +607,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                 )
               else if (_destination != null)
-                // ── Destination set, not yet started ─────────────────────
                 FilledButton(
                   onPressed: _isNavLoading ? null : _startRecording,
                   style: FilledButton.styleFrom(
@@ -672,7 +668,6 @@ class _HomePageState extends State<HomePage> {
 
 // ── Isolated animation widgets — own their AnimationControllers ───────────────
 
-// Location dot with pulsing ring — completely decoupled from parent state
 class _LocationDot extends StatefulWidget {
   const _LocationDot();
 
@@ -744,7 +739,6 @@ class _LocationDotState extends State<_LocationDot>
   }
 }
 
-// Static red dot for the recording chip — no animation, no allocation each build
 class _PulsingDot extends StatelessWidget {
   const _PulsingDot();
 
@@ -761,7 +755,6 @@ class _PulsingDot extends StatelessWidget {
   }
 }
 
-// Static green dot for the drivers chip
 class _GreenDot extends StatelessWidget {
   const _GreenDot();
 
@@ -817,13 +810,14 @@ class _ObstaclePinWidget extends StatelessWidget {
           child: Text(
             obstacle.label,
             style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w700),
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
         CustomPaint(
-          size: const Size(8, 5),
+          size: const Size(10, 5),
           painter: _TrianglePainter(color),
         ),
       ],
@@ -837,14 +831,13 @@ class _TrianglePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawPath(
-      ui.Path()
-        ..moveTo(0, 0)
-        ..lineTo(size.width, 0)
-        ..lineTo(size.width / 2, size.height)
-        ..close(),
-      Paint()..color = color,
-    );
+    final paint = Paint()..color = color;
+    final path = ui.Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..lineTo(size.width, 0)
+      ..close();
+    canvas.drawPath(path, paint);
   }
 
   @override
