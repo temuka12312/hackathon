@@ -45,6 +45,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
   // GPS recording (always wheelchair mode)
   bool _isRecording = false;
   List<LatLng> _recordedPoints = [];
+  List<double> _recordedElevations = [];
   StreamSubscription<Position>? _gpsSub;
   DateTime? _recordStart;
 
@@ -116,14 +117,14 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
         _isNavLoading = true;
       });
       try {
-        final points = await RoutingService.fetchRoute(
+        final routes = await RoutingService.fetchRoutes(
           start: _location,
           end: dest,
           profile: 'foot',
         );
         if (!mounted) return;
         setState(() {
-          _navRoutePoints = points;
+          _navRoutePoints = routes.isNotEmpty ? routes.first.points : [];
           _isNavLoading = false;
         });
       } catch (_) {
@@ -139,6 +140,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
   void _startRecording() {
     _recordStart = DateTime.now();
     _recordedPoints = [_location];
+    _recordedElevations = [0.0];
     _gpsSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
@@ -150,6 +152,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
       setState(() {
         _location = pt;
         _recordedPoints.add(pt);
+        _recordedElevations.add(pos.altitude);
       });
       if (_destination != null && _isRecording) {
         final dist = Geolocator.distanceBetween(
@@ -168,6 +171,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
     final sub = _gpsSub;
     final wasRecording = _isRecording;
     final points = List<LatLng>.from(_recordedPoints);
+    final elevations = List<double>.from(_recordedElevations);
     final start = _recordStart;
     _gpsSub = null;
     _isRecording = false;
@@ -177,6 +181,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
       try {
         await BackendService.saveRoute(
           points: points,
+          elevations: elevations,
           mode: 'wheelchair',
           startTime: start,
           endTime: DateTime.now(),
@@ -192,7 +197,12 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
         }
       } catch (_) {}
     }
-    if (mounted) setState(() => _recordedPoints = []);
+    if (mounted) {
+      setState(() {
+        _recordedPoints = [];
+        _recordedElevations = [];
+      });
+    }
   }
 
   Future<void> _clearDestination() async {

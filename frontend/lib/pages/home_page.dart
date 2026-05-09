@@ -35,6 +35,7 @@ class _HomePageState extends State<HomePage> {
   // Feature 2 — GPS recording
   bool _isRecording = false;
   List<LatLng> _recordedPoints = [];
+  List<double> _recordedElevations = [];
   StreamSubscription<Position>? _gpsSub;
   DateTime? _recordStart;
 
@@ -117,14 +118,14 @@ class _HomePageState extends State<HomePage> {
         _isNavLoading = true;
       });
       try {
-        final points = await RoutingService.fetchRoutes(
+        final routes = await RoutingService.fetchRoutes(
           start: _location,
           end: dest,
           profile: _osrmProfile(),
         );
         if (!mounted) return;
         setState(() {
-          _navRoutePoints = points.cast<LatLng>();
+          _navRoutePoints = routes.isNotEmpty ? routes.first.points : [];
           _isNavLoading = false;
         });
       } catch (_) {
@@ -160,6 +161,7 @@ class _HomePageState extends State<HomePage> {
   void _startRecording() {
     _recordStart = DateTime.now();
     _recordedPoints = [_location];
+    _recordedElevations = [0.0]; // placeholder for the initial location point
     _gpsSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
@@ -171,6 +173,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _location = pt;
         _recordedPoints.add(pt);
+        _recordedElevations.add(pos.altitude);
       });
       if (_destination != null && _isRecording) {
         final dist = Geolocator.distanceBetween(
@@ -188,6 +191,7 @@ class _HomePageState extends State<HomePage> {
     final sub = _gpsSub;
     final wasRecording = _isRecording;
     final points = List<LatLng>.from(_recordedPoints);
+    final elevations = List<double>.from(_recordedElevations);
     final start = _recordStart;
     _gpsSub = null;
     _isRecording = false;
@@ -197,6 +201,7 @@ class _HomePageState extends State<HomePage> {
       try {
         await BackendService.saveRoute(
           points: points,
+          elevations: elevations,
           mode: _modeString(),
           startTime: start,
           endTime: DateTime.now(),
@@ -212,7 +217,12 @@ class _HomePageState extends State<HomePage> {
         }
       } catch (_) {}
     }
-    if (mounted) setState(() => _recordedPoints = []);
+    if (mounted) {
+      setState(() {
+        _recordedPoints = [];
+        _recordedElevations = [];
+      });
+    }
   }
 
   Future<void> _clearDestination() async {

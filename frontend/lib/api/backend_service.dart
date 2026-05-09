@@ -93,17 +93,28 @@ class BackendService {
 
   static Future<void> saveRoute({
     required List<LatLng> points,
+    List<double>? elevations,
     required String mode,
     required DateTime startTime,
     required DateTime endTime,
   }) async {
+    final polyline = List.generate(points.length, (i) {
+      final pt = <String, dynamic>{
+        'lat': points[i].latitude,
+        'lng': points[i].longitude,
+      };
+      if (elevations != null && i < elevations.length) {
+        pt['ele'] = elevations[i];
+      }
+      return pt;
+    });
     final uri = Uri.parse('$baseUrl/api/routes');
     await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'transportMode': mode,
-        'polyline': points.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
+        'polyline': polyline,
         'startTime': startTime.toIso8601String(),
         'endTime': endTime.toIso8601String(),
       }),

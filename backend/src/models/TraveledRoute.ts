@@ -2,7 +2,7 @@ import mongoose, { Schema, Document, model } from "mongoose";
 
 export interface ITraveledRoute extends Document {
   transportMode: "car" | "walk" | "heavy" | "wheelchair";
-  polyline: { lat: number; lng: number }[];
+  polyline: { lat: number; lng: number; ele?: number }[];
   startTime: Date;
   endTime: Date;
   createdAt: Date;
@@ -20,6 +20,7 @@ const schema = new Schema<ITraveledRoute>(
       {
         lat: { type: Number, required: true },
         lng: { type: Number, required: true },
+        ele: { type: Number },
       },
     ],
     startTime: { type: Date, required: true },

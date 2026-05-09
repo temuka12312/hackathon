@@ -39,13 +39,13 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
 
   Future<void> _fetchRoute() async {
     try {
-      final points = await RoutingService.fetchRoute(
+      final routes = await RoutingService.fetchRoutes(
         start: _origin,
         end: _dest,
         profile: 'driving',
       );
       if (!mounted) return;
-      setState(() => _routePoints = points);
+      setState(() => _routePoints = routes.isNotEmpty ? routes.first.points : [_origin, _dest]);
     } catch (_) {
       if (!mounted) return;
       setState(() => _routePoints = [_origin, _dest]);
