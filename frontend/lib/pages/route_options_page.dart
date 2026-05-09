@@ -1,28 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import '../api/routing_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/map_zoom_controls.dart';
 import 'active_trip_page.dart';
 
 class RouteOptionsPage extends StatefulWidget {
-  const RouteOptionsPage({super.key, this.origin, this.destination});
-
-  final LatLng? origin;
-  final LatLng? destination;
+  const RouteOptionsPage({super.key});
 
   @override
   State<RouteOptionsPage> createState() => _RouteOptionsPageState();
 }
 
 class _RouteOptionsPageState extends State<RouteOptionsPage> {
-  static const _fallbackOrigin = LatLng(47.9184, 106.9177);
-  static const _fallbackDest = LatLng(47.9300, 106.9350);
+  static const double _minZoom = 5;
+  static const double _maxZoom = 18;
+  static const _origin = LatLng(47.9184, 106.9177);
+  static const _destination = LatLng(47.9300, 106.9350);
+  static const _route = [
+    _origin,
+    LatLng(47.922, 106.922),
+    LatLng(47.927, 106.930),
+    _destination,
+  ];
 
-  LatLng get _origin => widget.origin ?? _fallbackOrigin;
-  LatLng get _dest => widget.destination ?? _fallbackDest;
-
-  List<LatLng> _routePoints = [];
+  final MapController _mapController = MapController();
   int _selectedVehicle = 0;
 
   static const _vehicles = [
@@ -31,31 +33,11 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
     _Vehicle('Хүнд тээвэр', '8 мин', '₮11,200', Icons.local_shipping_rounded),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    _fetchRoute();
+  void _adjustZoom(double delta) {
+    final camera = _mapController.camera;
+    final nextZoom = (camera.zoom + delta).clamp(_minZoom, _maxZoom);
+    _mapController.move(camera.center, nextZoom);
   }
-
-  Future<void> _fetchRoute() async {
-    try {
-      final routes = await RoutingService.fetchRoutes(
-        start: _origin,
-        end: _dest,
-        profile: 'driving',
-      );
-      if (!mounted) return;
-      setState(() => _routePoints = routes.isNotEmpty ? routes.first.points : [_origin, _dest]);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _routePoints = [_origin, _dest]);
-    }
-  }
-
-  LatLng get _mapCenter => LatLng(
-        (_origin.latitude + _dest.latitude) / 2,
-        (_origin.longitude + _dest.longitude) / 2,
-      );
 
   @override
   Widget build(BuildContext context) {
@@ -65,26 +47,25 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
         children: [
           // Map
           FlutterMap(
-            options: MapOptions(
-              initialCenter: _mapCenter,
-              initialZoom: 13,
+            mapController: _mapController,
+            options: const MapOptions(
+              initialCenter: LatLng(47.924, 106.926),
+              initialZoom: 14,
             ),
             children: [
               TileLayer(
-                urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.ubcab.app',
               ),
-              if (_routePoints.isNotEmpty)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: _routePoints,
-                      strokeWidth: 5,
-                      color: AppColors.routeBlue,
-                    ),
-                  ],
-                ),
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: _route,
+                    strokeWidth: 5,
+                    color: AppColors.routeBlue,
+                  ),
+                ],
+              ),
               MarkerLayer(
                 markers: [
                   Marker(
@@ -99,16 +80,27 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                       ),
                     ),
                   ),
-                  Marker(
-                    point: _dest,
+                  const Marker(
+                    point: _destination,
                     width: 40,
                     height: 48,
-                    child: const Icon(Icons.location_pin,
-                        color: AppColors.danger, size: 48),
+                    child: Icon(
+                      Icons.location_pin,
+                      color: AppColors.danger,
+                      size: 48,
+                    ),
                   ),
                 ],
               ),
             ],
+          ),
+          Positioned(
+            right: 16,
+            bottom: 264,
+            child: MapZoomControls(
+              onZoomIn: () => _adjustZoom(1),
+              onZoomOut: () => _adjustZoom(-1),
+            ),
           ),
 
           // Top card
@@ -143,8 +135,11 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                             color: AppColors.bg3,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.arrow_back_ios_new_rounded,
-                              color: Colors.white, size: 16),
+                          child: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 14),
@@ -163,14 +158,28 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                const Text('Таны байршил',
-                                    style: TextStyle(
-                                        color: AppColors.muted,
-                                        fontSize: 13)),
+                                const Text(
+                                  'Таны байршил',
+                                  style: TextStyle(
+                                    color: AppColors.muted,
+                                    fontSize: 13,
+                                  ),
+                                ),
                               ],
                             ),
-                            const Divider(
-                                color: AppColors.bg3, height: 12),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Column(
+                                children: const [
+                                  SizedBox(height: 2),
+                                  Divider(
+                                    color: AppColors.bg3,
+                                    height: 12,
+                                    indent: 0,
+                                  ),
+                                ],
+                              ),
+                            ),
                             Row(
                               children: [
                                 Container(
@@ -182,15 +191,12 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    '${_dest.latitude.toStringAsFixed(4)}, '
-                                    '${_dest.longitude.toStringAsFixed(4)}',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis,
+                                const Text(
+                                  'Сүхбаатарын талбай',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ],
@@ -255,8 +261,7 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: FilledButton(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const ActiveTripPage()),
+                    MaterialPageRoute(builder: (_) => const ActiveTripPage()),
                   ),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -268,9 +273,10 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                   child: const Text(
                     'Захиалах',
                     style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600),
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -303,32 +309,43 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                 Icon(v.icon, color: Colors.white, size: 20),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(v.eta,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500)),
+                  child: Text(
+                    v.eta,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ],
             ),
             const Spacer(),
-            Text(v.name,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              v.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(v.price,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700)),
+            Text(
+              v.price,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),

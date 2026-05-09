@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -18,11 +19,79 @@ class RoutingService {
     required LatLng end,
     required String profile,
   }) async {
+    if (profile == 'driving-shortest') {
+      return _fetchNeighborhoodShortcutRoutes(start: start, end: end);
+    }
+
     if (_orsApiKey.isNotEmpty) {
       return _fetchOrsRoutes(start: start, end: end, profile: profile);
     }
 
     return _fetchOsrmRoutes(start: start, end: end, profile: profile);
+  }
+
+  static Future<List<RoutePath>> _fetchNeighborhoodShortcutRoutes({
+    required LatLng start,
+    required LatLng end,
+  }) async {
+    final baseRoutes = _orsApiKey.isNotEmpty
+        ? await _fetchOrsRoutes(
+            start: start,
+            end: end,
+            profile: 'driving-shortest',
+          )
+        : await _fetchOsrmRoutes(
+            start: start,
+            end: end,
+            profile: 'driving-shortest',
+          );
+
+    final candidates = <RoutePath>[...baseRoutes];
+    final viaPoints = _buildNeighborhoodViaPoints(start, end);
+
+    for (final via in viaPoints) {
+      try {
+        final firstLeg = _orsApiKey.isNotEmpty
+            ? await _fetchOrsRoutes(
+                start: start,
+                end: via,
+                profile: 'driving-shortest',
+              )
+            : await _fetchOsrmRoutes(
+                start: start,
+                end: via,
+                profile: 'driving-shortest',
+              );
+        final secondLeg = _orsApiKey.isNotEmpty
+            ? await _fetchOrsRoutes(
+                start: via,
+                end: end,
+                profile: 'driving-shortest',
+              )
+            : await _fetchOsrmRoutes(
+                start: via,
+                end: end,
+                profile: 'driving-shortest',
+              );
+
+        if (firstLeg.isEmpty || secondLeg.isEmpty) {
+          continue;
+        }
+
+        candidates.add(_mergeRoutePaths(firstLeg.first, secondLeg.first));
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (_orsApiKey.isNotEmpty) {
+      candidates.sort(
+        (a, b) => _neighborhoodScore(b).compareTo(_neighborhoodScore(a)),
+      );
+    } else {
+      candidates.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+    }
+    return candidates;
   }
 
   static Future<List<RoutePath>> _fetchOsrmRoutes({
@@ -32,6 +101,7 @@ class RoutingService {
   }) async {
     final osrmProfile = switch (profile) {
       'driving-car' => 'driving',
+      'driving-shortest' => 'driving',
       'foot-walking' => 'foot',
       'wheelchair' => 'foot',
       _ => profile,
@@ -63,8 +133,8 @@ class RoutingService {
       throw Exception('No route found');
     }
 
-    final parsedRoutes = routes.map(_parseOsrmRoute).toList()
-      ..sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+    final parsedRoutes = routes.map(_parseOsrmRoute).toList();
+    _sortRoutesForProfile(parsedRoutes, profile);
 
     return parsedRoutes;
   }
@@ -74,13 +144,18 @@ class RoutingService {
     required LatLng end,
     required String profile,
   }) async {
-    final uri = Uri.parse('$_orsBaseUrl/$profile/geojson');
+    final orsProfile = switch (profile) {
+      'driving-shortest' => 'driving-car',
+      _ => profile,
+    };
+    final uri = Uri.parse('$_orsBaseUrl/$orsProfile/geojson');
     final options = _orsOptionsFor(profile);
     final body = <String, dynamic>{
       'coordinates': [
         [start.longitude, start.latitude],
         [end.longitude, end.latitude],
       ],
+      'preference': _orsPreferenceFor(profile),
       'instructions': false,
       'elevation': false,
       'extra_info': ['waytype', 'surface', 'roadaccessrestrictions'],
@@ -107,8 +182,8 @@ class RoutingService {
       throw Exception('No route found');
     }
 
-    final parsedRoutes = features.map(_parseOrsFeature).toList()
-      ..sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+    final parsedRoutes = features.map(_parseOrsFeature).toList();
+    _sortRoutesForProfile(parsedRoutes, profile);
 
     return parsedRoutes;
   }
@@ -137,6 +212,7 @@ class RoutingService {
     final properties =
         featureJson['properties'] as Map<String, dynamic>? ?? const {};
     final summary = properties['summary'] as Map<String, dynamic>? ?? const {};
+    final extras = properties['extras'] as Map<String, dynamic>? ?? const {};
 
     final points = coordinatesJson.map(_parseCoordinate).toList();
 
@@ -144,12 +220,121 @@ class RoutingService {
       points: points,
       distanceMeters: (summary['distance'] as num?)?.toDouble() ?? 0,
       durationSeconds: (summary['duration'] as num?)?.toDouble() ?? 0,
+      neighborhoodShare: _orsWayTypeShare(extras, 3),
+      arterialShare: _orsWayTypeShare(extras, 1) + _orsWayTypeShare(extras, 2),
     );
   }
 
   static LatLng _parseCoordinate(dynamic point) {
     final values = point as List<dynamic>;
     return LatLng((values[1] as num).toDouble(), (values[0] as num).toDouble());
+  }
+
+  static List<LatLng> _buildNeighborhoodViaPoints(LatLng start, LatLng end) {
+    final midLat = (start.latitude + end.latitude) / 2;
+    final midLng = (start.longitude + end.longitude) / 2;
+    final deltaLat = end.latitude - start.latitude;
+    final deltaLng = end.longitude - start.longitude;
+    final length = _safeHypot(deltaLat, deltaLng);
+
+    if (length == 0) {
+      return const [];
+    }
+
+    final perpendicularLat = -deltaLng / length;
+    final perpendicularLng = deltaLat / length;
+    final offset = (length * 0.22).clamp(0.0012, 0.0042);
+
+    return [
+      LatLng(
+        midLat + perpendicularLat * offset,
+        midLng + perpendicularLng * offset,
+      ),
+      LatLng(
+        midLat - perpendicularLat * offset,
+        midLng - perpendicularLng * offset,
+      ),
+      LatLng(
+        midLat + perpendicularLat * (offset * 0.55),
+        midLng + perpendicularLng * (offset * 0.55),
+      ),
+      LatLng(
+        midLat - perpendicularLat * (offset * 0.55),
+        midLng - perpendicularLng * (offset * 0.55),
+      ),
+      LatLng(
+        start.latitude + (deltaLat * 0.30) + perpendicularLat * offset,
+        start.longitude + (deltaLng * 0.30) + perpendicularLng * offset,
+      ),
+      LatLng(
+        start.latitude + (deltaLat * 0.30) - perpendicularLat * offset,
+        start.longitude + (deltaLng * 0.30) - perpendicularLng * offset,
+      ),
+      LatLng(
+        start.latitude + (deltaLat * 0.68) + perpendicularLat * offset,
+        start.longitude + (deltaLng * 0.68) + perpendicularLng * offset,
+      ),
+      LatLng(
+        start.latitude + (deltaLat * 0.68) - perpendicularLat * offset,
+        start.longitude + (deltaLng * 0.68) - perpendicularLng * offset,
+      ),
+    ];
+  }
+
+  static RoutePath _mergeRoutePaths(RoutePath first, RoutePath second) {
+    final mergedPoints = [...first.points, ...second.points.skip(1)];
+
+    return RoutePath(
+      points: mergedPoints,
+      distanceMeters: first.distanceMeters + second.distanceMeters,
+      durationSeconds: first.durationSeconds + second.durationSeconds,
+      neighborhoodShare:
+          ((first.neighborhoodShare * first.distanceMeters) +
+              (second.neighborhoodShare * second.distanceMeters)) /
+          (first.distanceMeters + second.distanceMeters),
+      arterialShare:
+          ((first.arterialShare * first.distanceMeters) +
+              (second.arterialShare * second.distanceMeters)) /
+          (first.distanceMeters + second.distanceMeters),
+    );
+  }
+
+  static double _safeHypot(double a, double b) {
+    return math.sqrt((a * a) + (b * b));
+  }
+
+  static double _orsWayTypeShare(Map<String, dynamic> extras, int targetValue) {
+    final waytype = extras['waytype'] as Map<String, dynamic>? ?? const {};
+    final summary = waytype['summary'] as List<dynamic>? ?? const [];
+    double matchedDistance = 0;
+    double totalDistance = 0;
+
+    for (final entry in summary) {
+      final json = entry as Map<String, dynamic>? ?? const {};
+      final value = (json['value'] as num?)?.toInt();
+      final distance = (json['distance'] as num?)?.toDouble() ?? 0;
+      totalDistance += distance;
+      if (value == targetValue) {
+        matchedDistance += distance;
+      }
+    }
+
+    if (totalDistance == 0) {
+      return 0;
+    }
+
+    return matchedDistance / totalDistance;
+  }
+
+  static double _neighborhoodScore(RoutePath route) {
+    final neighborhoodBias = route.neighborhoodShare * 1000;
+    final arterialPenalty = route.arterialShare * 600;
+    final distancePenalty = route.distanceMeters * 0.08;
+    final durationPenalty = route.durationSeconds * 0.015;
+    return neighborhoodBias -
+        arterialPenalty -
+        distancePenalty -
+        durationPenalty;
   }
 
   static Map<String, dynamic>? _orsOptionsFor(String profile) {
@@ -175,8 +360,35 @@ class RoutingService {
         return {
           'avoid_features': ['ferries'],
         };
+      case 'driving-shortest':
+        return {
+          'avoid_features': ['highways', 'tollways', 'ferries'],
+        };
       default:
         return null;
+    }
+  }
+
+  static String _orsPreferenceFor(String profile) {
+    switch (profile) {
+      case 'driving-shortest':
+        return 'shortest';
+      default:
+        return 'recommended';
+    }
+  }
+
+  static void _sortRoutesForProfile(List<RoutePath> routes, String profile) {
+    switch (profile) {
+      case 'driving-shortest':
+        routes.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
+        return;
+      case 'driving-car':
+      case 'foot-walking':
+      case 'wheelchair':
+      default:
+        routes.sort((a, b) => a.durationSeconds.compareTo(b.durationSeconds));
+        return;
     }
   }
 }
@@ -186,9 +398,13 @@ class RoutePath {
     required this.points,
     required this.distanceMeters,
     required this.durationSeconds,
+    this.neighborhoodShare = 0,
+    this.arterialShare = 0,
   });
 
   final List<LatLng> points;
   final double distanceMeters;
   final double durationSeconds;
+  final double neighborhoodShare;
+  final double arterialShare;
 }

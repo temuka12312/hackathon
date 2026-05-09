@@ -1,12 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import '../api/backend_service.dart';
-import '../api/routing_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/map_zoom_controls.dart';
 
 class AccessibilityMapPage extends StatefulWidget {
   const AccessibilityMapPage({super.key});
@@ -16,12 +12,14 @@ class AccessibilityMapPage extends StatefulWidget {
 }
 
 class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
+  static const double _minZoom = 5;
+  static const double _maxZoom = 18;
   bool _showRamps = true;
   bool _showElevators = true;
   bool _showClosed = true;
+  final MapController _mapController = MapController();
 
   static const _center = LatLng(47.9184, 106.9177);
-  LatLng _location = _center;
 
   static const _ramps = [
     LatLng(47.9200, 106.9180),
@@ -37,190 +35,11 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
     LatLng(47.9265, 106.9195),
   ];
 
-  // Destination + OSRM preview route
-  LatLng? _destination;
-  List<LatLng> _navRoutePoints = [];
-  bool _isNavLoading = false;
-
-  // GPS recording (always wheelchair mode)
-  bool _isRecording = false;
-  List<LatLng> _recordedPoints = [];
-  List<double> _recordedElevations = [];
-  StreamSubscription<Position>? _gpsSub;
-  DateTime? _recordStart;
-
-  // Concurrency guard
-  bool _isBusy = false;
-
-  // Community routes — precomputed, not rebuilt every frame
-  List<Polyline> _communityPolylines = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _initLocation();
-    _loadSavedRoutes();
+  void _adjustZoom(double delta) {
+    final camera = _mapController.camera;
+    final nextZoom = (camera.zoom + delta).clamp(_minZoom, _maxZoom);
+    _mapController.move(camera.center, nextZoom);
   }
-
-  @override
-  void dispose() {
-    _gpsSub?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _initLocation() async {
-    try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) { return; }
-      final pos = await Geolocator.getCurrentPosition();
-      if (!mounted) { return; }
-      setState(() => _location = LatLng(pos.latitude, pos.longitude));
-    } catch (_) {}
-  }
-
-  Future<void> _loadSavedRoutes() async {
-    try {
-      final raw = await BackendService.getRoutes();
-      if (!mounted) return;
-      // Wheelchair routes full opacity purple; others faint
-      final polylines = <Polyline>[];
-      for (final r in raw) {
-        final mode = r['transportMode'] as String;
-        final pts = (r['polyline'] as List).map<LatLng>((p) =>
-          LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble())
-        ).toList();
-        if (pts.length >= 2) {
-          polylines.add(Polyline(
-            points: pts,
-            strokeWidth: mode == 'wheelchair' ? 4.0 : 2.5,
-            color: _communityColor(mode).withValues(
-                alpha: mode == 'wheelchair' ? 0.7 : 0.2),
-          ));
-        }
-      }
-      setState(() => _communityPolylines = polylines);
-    } catch (_) {}
-  }
-
-  Future<void> _setDestination(LatLng dest) async {
-    if (_isBusy) return;
-    _isBusy = true;
-    try {
-      await _stopRecording();
-      setState(() {
-        _destination = dest;
-        _navRoutePoints = [];
-        _isNavLoading = true;
-      });
-      try {
-        final routes = await RoutingService.fetchRoutes(
-          start: _location,
-          end: dest,
-          profile: 'foot',
-        );
-        if (!mounted) return;
-        setState(() {
-          _navRoutePoints = routes.isNotEmpty ? routes.first.points : [];
-          _isNavLoading = false;
-        });
-      } catch (_) {
-        if (!mounted) return;
-        setState(() => _isNavLoading = false);
-      }
-      _startRecording();
-    } finally {
-      _isBusy = false;
-    }
-  }
-
-  void _startRecording() {
-    _recordStart = DateTime.now();
-    _recordedPoints = [_location];
-    _recordedElevations = [0.0];
-    _gpsSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen((pos) {
-      if (!mounted) return;
-      final pt = LatLng(pos.latitude, pos.longitude);
-      setState(() {
-        _location = pt;
-        _recordedPoints.add(pt);
-        _recordedElevations.add(pos.altitude);
-      });
-      if (_destination != null && _isRecording) {
-        final dist = Geolocator.distanceBetween(
-          pos.latitude, pos.longitude,
-          _destination!.latitude, _destination!.longitude,
-        );
-        if (dist <= 30) _stopRecording();
-      }
-    });
-    setState(() => _isRecording = true);
-  }
-
-  Future<void> _stopRecording() async {
-    if (!_isRecording && _gpsSub == null) return;
-    // Capture and clear immediately to prevent re-entry
-    final sub = _gpsSub;
-    final wasRecording = _isRecording;
-    final points = List<LatLng>.from(_recordedPoints);
-    final elevations = List<double>.from(_recordedElevations);
-    final start = _recordStart;
-    _gpsSub = null;
-    _isRecording = false;
-    await sub?.cancel();
-
-    if (wasRecording && points.length >= 2 && start != null) {
-      try {
-        await BackendService.saveRoute(
-          points: points,
-          elevations: elevations,
-          mode: 'wheelchair',
-          startTime: start,
-          endTime: DateTime.now(),
-        );
-        await _loadSavedRoutes();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Хүртээмжийн маршрут хадгалагдлаа'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      } catch (_) {}
-    }
-    if (mounted) {
-      setState(() {
-        _recordedPoints = [];
-        _recordedElevations = [];
-      });
-    }
-  }
-
-  Future<void> _clearDestination() async {
-    await _stopRecording();
-    if (mounted) {
-      setState(() {
-        _destination = null;
-        _navRoutePoints = [];
-      });
-    }
-  }
-
-  static Color _communityColor(String mode) => switch (mode) {
-        'wheelchair' => const Color(0xFF9C27B0),
-        'walk' => AppColors.success,
-        'heavy' => AppColors.warning,
-        _ => AppColors.routeBlue,
-      };
 
   @override
   Widget build(BuildContext context) {
@@ -228,49 +47,15 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
       backgroundColor: AppColors.bg1,
       body: Stack(
         children: [
+          // Map with accessibility circles
           FlutterMap(
-            options: MapOptions(
-              initialCenter: _center,
-              initialZoom: 14,
-              onTap: (_, latLng) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) _setDestination(latLng);
-                });
-              },
-            ),
+            mapController: _mapController,
+            options: const MapOptions(initialCenter: _center, initialZoom: 14),
             children: [
               TileLayer(
-                urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.ubcab.app',
               ),
-              // Community routes — precomputed
-              if (_communityPolylines.isNotEmpty)
-                PolylineLayer(polylines: _communityPolylines),
-              // OSRM preview route
-              if (_navRoutePoints.isNotEmpty)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: _navRoutePoints,
-                      strokeWidth: 5,
-                      color: const Color(0xFF9C27B0),
-                    ),
-                  ],
-                ),
-              // Actual GPS track while recording
-              if (_isRecording && _recordedPoints.length >= 2)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: _recordedPoints,
-                      strokeWidth: 4,
-                      color:
-                          const Color(0xFF9C27B0).withValues(alpha: 0.6),
-                    ),
-                  ],
-                ),
-              // Accessibility feature circles
               CircleLayer(
                 circles: [
                   if (_showRamps)
@@ -305,35 +90,18 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
                     ),
                 ],
               ),
-              // User location + destination markers
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: _location,
-                    width: 18,
-                    height: 18,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF9C27B0),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2.5),
-                      ),
-                    ),
-                  ),
-                  if (_destination != null)
-                    Marker(
-                      point: _destination!,
-                      width: 40,
-                      height: 48,
-                      child: const Icon(Icons.location_pin,
-                          color: Color(0xFF9C27B0), size: 48),
-                    ),
-                ],
-              ),
             ],
           ),
+          Positioned(
+            right: 16,
+            bottom: 232,
+            child: MapZoomControls(
+              onZoomIn: () => _adjustZoom(1),
+              onZoomOut: () => _adjustZoom(-1),
+            ),
+          ),
 
-          // Top banner
+          // Top accessibility banner
           Positioned(
             top: 0,
             left: 0,
@@ -346,22 +114,27 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
                   Container(
                     margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.success,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.accessible_rounded,
-                            color: Colors.white, size: 18),
+                    child: Row(
+                      children: const [
+                        Icon(
+                          Icons.accessible_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Хүртээмжийн горим — газрыг дарж очих газраа тэмдэглэнэ үү',
+                            'Хүртээмжийн горим идэвхтэй',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 12,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -369,80 +142,10 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
                       ],
                     ),
                   ),
-                  if (_destination != null)
-                    Container(
-                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.bg2,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.location_pin,
-                              color: Color(0xFF9C27B0), size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _isNavLoading
-                                ? const SizedBox(
-                                    height: 14,
-                                    width: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Color(0xFF9C27B0),
-                                    ),
-                                  )
-                                : Text(
-                                    '${_destination!.latitude.toStringAsFixed(4)}, '
-                                    '${_destination!.longitude.toStringAsFixed(4)}',
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 12),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                          ),
-                          GestureDetector(
-                            onTap: _clearDestination,
-                            child: const Icon(Icons.close_rounded,
-                                color: AppColors.muted, size: 18),
-                          ),
-                        ],
-                      ),
-                    ),
                 ],
               ),
             ),
           ),
-
-          // Recording status chip
-          if (_isRecording)
-            Positioned(
-              bottom: 220,
-              right: 20,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF9C27B0).withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _RecordingDot(),
-                    SizedBox(width: 6),
-                    Text(
-                      'Бичлэглэж байна',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
           // Bottom legend panel
           Positioned(
@@ -452,14 +155,12 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
             child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.bg2,
-                borderRadius:
-                    BorderRadius.vertical(top: Radius.circular(20)),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: SafeArea(
                 top: false,
                 child: Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(20, 14, 20, 16),
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -552,22 +253,6 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
           inactiveTrackColor: AppColors.bg3,
         ),
       ],
-    );
-  }
-}
-
-class _RecordingDot extends StatelessWidget {
-  const _RecordingDot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-      ),
     );
   }
 }
