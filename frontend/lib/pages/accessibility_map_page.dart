@@ -189,7 +189,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
                       Icons.accessible_rounded,
                       'Рамп',
                       _showRamps,
-                      (v) => setState(() => _showRamps = v),
+                      (value) => setState(() => _showRamps = value),
                     ),
                     const SizedBox(height: 12),
                     _legendRow(
@@ -197,7 +197,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
                       Icons.elevator_rounded,
                       'Лифт',
                       _showElevators,
-                      (v) => setState(() => _showElevators = v),
+                      (value) => setState(() => _showElevators = value),
                     ),
                     const SizedBox(height: 12),
                     _legendRow(
@@ -205,7 +205,7 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
                       Icons.block_rounded,
                       'Хаалттай зам',
                       _showClosed,
-                      (v) => setState(() => _showClosed = v),
+                      (value) => setState(() => _showClosed = value),
                     ),
                   ],
                 ),

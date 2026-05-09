@@ -1,10 +1,11 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
 
-import '../models/report_item.dart';
-import '../models/login_response.dart';
 import '../models/auth_response.dart';
+import '../models/login_response.dart';
+import '../models/report_item.dart';
 import 'api_client.dart';
 
 class BackendService {
@@ -33,7 +34,6 @@ class BackendService {
     }
 
     Map<String, dynamic> json = const {};
-
     if (response.body.isNotEmpty) {
       try {
         json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -72,7 +72,6 @@ class BackendService {
     }
 
     Map<String, dynamic> json = const {};
-
     if (response.body.isNotEmpty) {
       try {
         json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -114,6 +113,56 @@ class BackendService {
         .whereType<Map<String, dynamic>>()
         .map(ReportItem.fromJson)
         .toList();
+  }
+
+  static Future<void> saveRoute({
+    required List<LatLng> points,
+    List<double>? elevations,
+    required String mode,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/routes');
+    final polyline = List.generate(points.length, (index) {
+      final point = <String, dynamic>{
+        'lat': points[index].latitude,
+        'lng': points[index].longitude,
+      };
+      if (elevations != null && index < elevations.length) {
+        point['ele'] = elevations[index];
+      }
+      return point;
+    });
+
+    http.Response response;
+    try {
+      response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'transportMode': mode,
+          'polyline': polyline,
+          'startTime': startTime.toIso8601String(),
+          'endTime': endTime.toIso8601String(),
+        }),
+      );
+    } catch (_) {
+      throw Exception('Маршрут хадгалах үед backend-тай холбогдож чадсангүй.');
+    }
+
+    if (response.statusCode != 201) {
+      throw Exception('Маршрут хадгалж чадсангүй. (${response.statusCode})');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getRoutes() async {
+    final uri = Uri.parse('$baseUrl/api/routes');
+    final response = await http.get(uri);
+    if (response.statusCode != 200) {
+      return [];
+    }
+    final list = jsonDecode(response.body) as List<dynamic>;
+    return list.cast<Map<String, dynamic>>();
   }
 
   static String get _portLabel => Uri.parse(baseUrl).port.toString();
