@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:frontend/models/auth_response.dart';
 
 import '../api/backend_service.dart';
 import '../components/registration_form.dart';

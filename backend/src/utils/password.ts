@@ -13,6 +13,7 @@ export const hashPassword = (password: string) => {
   return `${salt}:${hash}`;
 };
 
+<<<<<<< HEAD
 export const verifyPassword = (password: string, passwordHash: string) => {
   const [salt, storedHash] = passwordHash.split(":");
 
@@ -21,11 +22,26 @@ export const verifyPassword = (password: string, passwordHash: string) => {
   }
 
   const candidateHash = crypto
+=======
+export const verifyPassword = (password: string, storedHash: string) => {
+  const [salt, originalHash] = storedHash.split(":");
+
+  if (!salt || !originalHash) {
+    return false;
+  }
+
+  const derivedHash = crypto
+>>>>>>> ff4d34b5abbaf7de8c00a97eebfc5677583bfcaa
     .pbkdf2Sync(password, salt, HASH_ITERATIONS, KEY_LENGTH, DIGEST)
     .toString("hex");
 
   return crypto.timingSafeEqual(
+<<<<<<< HEAD
     Buffer.from(candidateHash, "hex"),
     Buffer.from(storedHash, "hex"),
+=======
+    Buffer.from(derivedHash, "hex"),
+    Buffer.from(originalHash, "hex"),
+>>>>>>> ff4d34b5abbaf7de8c00a97eebfc5677583bfcaa
   );
 };
