@@ -1,26 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../api/routing_service.dart';
 import '../theme/app_colors.dart';
 import 'active_trip_page.dart';
 
 class RouteOptionsPage extends StatefulWidget {
-  const RouteOptionsPage({super.key});
+  const RouteOptionsPage({super.key, this.origin, this.destination});
+
+  final LatLng? origin;
+  final LatLng? destination;
 
   @override
   State<RouteOptionsPage> createState() => _RouteOptionsPageState();
 }
 
 class _RouteOptionsPageState extends State<RouteOptionsPage> {
-  static const _origin = LatLng(47.9184, 106.9177);
-  static const _destination = LatLng(47.9300, 106.9350);
-  static const _route = [
-    _origin,
-    LatLng(47.922, 106.922),
-    LatLng(47.927, 106.930),
-    _destination,
-  ];
+  static const _fallbackOrigin = LatLng(47.9184, 106.9177);
+  static const _fallbackDest = LatLng(47.9300, 106.9350);
 
+  LatLng get _origin => widget.origin ?? _fallbackOrigin;
+  LatLng get _dest => widget.destination ?? _fallbackDest;
+
+  List<LatLng> _routePoints = [];
   int _selectedVehicle = 0;
 
   static const _vehicles = [
@@ -30,6 +32,32 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _fetchRoute();
+  }
+
+  Future<void> _fetchRoute() async {
+    try {
+      final points = await RoutingService.fetchRoute(
+        start: _origin,
+        end: _dest,
+        profile: 'driving',
+      );
+      if (!mounted) return;
+      setState(() => _routePoints = points);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _routePoints = [_origin, _dest]);
+    }
+  }
+
+  LatLng get _mapCenter => LatLng(
+        (_origin.latitude + _dest.latitude) / 2,
+        (_origin.longitude + _dest.longitude) / 2,
+      );
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg1,
@@ -37,9 +65,9 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
         children: [
           // Map
           FlutterMap(
-            options: const MapOptions(
-              initialCenter: LatLng(47.924, 106.926),
-              initialZoom: 14,
+            options: MapOptions(
+              initialCenter: _mapCenter,
+              initialZoom: 13,
             ),
             children: [
               TileLayer(
@@ -47,15 +75,16 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.ubcab.app',
               ),
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: _route,
-                    strokeWidth: 5,
-                    color: AppColors.routeBlue,
-                  ),
-                ],
-              ),
+              if (_routePoints.isNotEmpty)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _routePoints,
+                      strokeWidth: 5,
+                      color: AppColors.routeBlue,
+                    ),
+                  ],
+                ),
               MarkerLayer(
                 markers: [
                   Marker(
@@ -70,11 +99,11 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                       ),
                     ),
                   ),
-                  const Marker(
-                    point: _destination,
+                  Marker(
+                    point: _dest,
                     width: 40,
                     height: 48,
-                    child: Icon(Icons.location_pin,
+                    child: const Icon(Icons.location_pin,
                         color: AppColors.danger, size: 48),
                   ),
                 ],
@@ -140,18 +169,8 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                                         fontSize: 13)),
                               ],
                             ),
-                            Padding(
-                              padding: const EdgeInsets.only(left: 4),
-                              child: Column(
-                                children: const [
-                                  SizedBox(height: 2),
-                                  Divider(
-                                      color: AppColors.bg3,
-                                      height: 12,
-                                      indent: 0),
-                                ],
-                              ),
-                            ),
+                            const Divider(
+                                color: AppColors.bg3, height: 12),
                             Row(
                               children: [
                                 Container(
@@ -163,11 +182,17 @@ class _RouteOptionsPageState extends State<RouteOptionsPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                const Text('Сүхбаатарын талбай',
-                                    style: TextStyle(
+                                Expanded(
+                                  child: Text(
+                                    '${_dest.latitude.toStringAsFixed(4)}, '
+                                    '${_dest.longitude.toStringAsFixed(4)}',
+                                    style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 13,
-                                        fontWeight: FontWeight.w600)),
+                                        fontWeight: FontWeight.w600),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ],
                             ),
                           ],

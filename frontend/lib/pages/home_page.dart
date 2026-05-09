@@ -1,8 +1,11 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-
+import '../api/backend_service.dart';
 import '../api/routing_service.dart';
 import '../theme/app_colors.dart';
 import 'route_options_page.dart';
@@ -14,92 +17,216 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
+// No SingleTickerProviderStateMixin — animation lives in _LocationDot
 class _HomePageState extends State<HomePage> {
-  static const LatLng _defaultLocation = LatLng(47.9184, 106.9177);
-  static const String _defaultRoute = 'Такси';
-  static const String _defaultSafeMode = 'Явган';
-
+  static const _defaultLocation = LatLng(47.9184, 106.9177);
   final MapController _mapController = MapController();
+  LatLng _location = _defaultLocation;
+  int _selectedMode = 0;
 
-  LatLng _currentLocation = _defaultLocation;
-  String? _locationError;
-  String _selectedRoute = _defaultRoute;
-  String _selectedSafeMode = _defaultSafeMode;
-  List<LatLng> _activeRoutePoints = const [];
-  bool _isRouteLoading = false;
-  String? _routeError;
+  // Concurrency guard — prevents overlapping _setDestination calls
+  bool _isBusy = false;
+
+  // Feature 1 — destination + OSRM preview route
+  LatLng? _destination;
+  List<LatLng> _navRoutePoints = [];
+  bool _isNavLoading = false;
+
+  // Feature 2 — GPS recording
+  bool _isRecording = false;
+  List<LatLng> _recordedPoints = [];
+  StreamSubscription<Position>? _gpsSub;
+  DateTime? _recordStart;
+
+  // Feature 3 — community routes (precomputed, not rebuilt every frame)
+  List<Polyline> _communityPolylines = [];
+
+  static const _obstacles = [
+    _Obstacle(47.9220, 106.9190, _ObstacleType.ice, 'Мөс'),
+    _Obstacle(47.9150, 106.9250, _ObstacleType.construction, 'Засвар'),
+    _Obstacle(47.9195, 106.9130, _ObstacleType.congestion, 'Бөглөрөл'),
+    _Obstacle(47.9270, 106.9220, _ObstacleType.accident, 'Осол'),
+  ];
+
+  static const _modes = [
+    (label: 'Машин', icon: Icons.directions_car_rounded),
+    (label: 'Явган', icon: Icons.directions_walk_rounded),
+    (label: 'Хүнд тээвэр', icon: Icons.local_shipping_rounded),
+    (label: 'Хүртээмж', icon: Icons.accessible_rounded),
+  ];
 
   @override
   void initState() {
     super.initState();
-    _initializeLocation();
+    _initLocation();
+    _loadSavedRoutes();
   }
 
-  Future<void> _initializeLocation() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  @override
+  void dispose() {
+    _gpsSub?.cancel();
+    super.dispose();
+  }
 
-    if (!serviceEnabled) {
-      setState(() {
-        _locationError = 'Location service унтраалттай байна.';
-      });
-      await _loadSelectedRoute();
-      return;
-    }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.denied) {
-      setState(() {
-        _locationError = 'Location permission зөвшөөрөөгүй байна.';
-      });
-      await _loadSelectedRoute();
-      return;
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      setState(() {
-        _locationError =
-            'Location permission бүрмөсөн хаалттай байна. Settings-ээс зөвшөөрнө үү.';
-      });
-      await _loadSelectedRoute();
-      return;
-    }
-
+  Future<void> _initLocation() async {
     try {
-      final position = await Geolocator.getCurrentPosition();
-      if (!mounted) {
-        return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
       }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) { return; }
+      final pos = await Geolocator.getCurrentPosition();
+      if (!mounted) { return; }
+      setState(() => _location = LatLng(pos.latitude, pos.longitude));
+      _mapController.move(_location, 15);
+    } catch (_) {}
+  }
 
+  Future<void> _loadSavedRoutes() async {
+    try {
+      final raw = await BackendService.getRoutes();
+      if (!mounted) return;
+      // Precompute Polyline objects here — not in build()
+      final polylines = <Polyline>[];
+      for (final r in raw) {
+        final mode = r['transportMode'] as String;
+        final pts = (r['polyline'] as List).map<LatLng>((p) =>
+          LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble())
+        ).toList();
+        if (pts.length >= 2) {
+          polylines.add(Polyline(
+            points: pts,
+            strokeWidth: 3,
+            color: _communityColor(mode).withValues(alpha: 0.25),
+          ));
+        }
+      }
+      setState(() => _communityPolylines = polylines);
+    } catch (_) {}
+  }
+
+  Future<void> _setDestination(LatLng dest) async {
+    if (_isBusy) return;
+    _isBusy = true;
+    try {
+      await _stopRecording();
       setState(() {
-        _currentLocation = LatLng(position.latitude, position.longitude);
-        _locationError = null;
+        _destination = dest;
+        _navRoutePoints = [];
+        _isNavLoading = true;
       });
-    } catch (_) {
-      if (!mounted) {
-        return;
+      try {
+        final points = await RoutingService.fetchRoutes(
+          start: _location,
+          end: dest,
+          profile: _osrmProfile(),
+        );
+        if (!mounted) return;
+        setState(() {
+          _navRoutePoints = points.cast<LatLng>();
+          _isNavLoading = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _isNavLoading = false);
       }
+      // Recording starts only when user explicitly taps "Аялал эхлүүлэх"
+    } finally {
+      _isBusy = false;
+    }
+  }
 
+  String _osrmProfile() =>
+      (_selectedMode == 1 || _selectedMode == 3) ? 'foot' : 'driving';
+
+  String _modeString() =>
+      const ['car', 'walk', 'heavy', 'wheelchair'][_selectedMode];
+
+  Color _modeColor() => switch (_selectedMode) {
+        1 => AppColors.success,
+        2 => AppColors.warning,
+        3 => const Color(0xFF9C27B0),
+        _ => AppColors.routeBlue,
+      };
+
+  static Color _communityColor(String mode) => switch (mode) {
+        'walk' => AppColors.success,
+        'heavy' => AppColors.warning,
+        'wheelchair' => const Color(0xFF9C27B0),
+        _ => AppColors.routeBlue,
+      };
+
+  void _startRecording() {
+    _recordStart = DateTime.now();
+    _recordedPoints = [_location];
+    _gpsSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    ).listen((pos) {
+      if (!mounted) return;
+      final pt = LatLng(pos.latitude, pos.longitude);
       setState(() {
-        _locationError = 'Таны байршлыг авч чадсангүй.';
+        _location = pt;
+        _recordedPoints.add(pt);
+      });
+      if (_destination != null && _isRecording) {
+        final dist = Geolocator.distanceBetween(
+          pos.latitude, pos.longitude,
+          _destination!.latitude, _destination!.longitude,
+        );
+        if (dist <= 30) _stopRecording();
+      }
+    });
+    setState(() => _isRecording = true);
+  }
+
+  Future<void> _stopRecording() async {
+    if (!_isRecording && _gpsSub == null) return;
+    final sub = _gpsSub;
+    final wasRecording = _isRecording;
+    final points = List<LatLng>.from(_recordedPoints);
+    final start = _recordStart;
+    _gpsSub = null;
+    _isRecording = false;
+    await sub?.cancel();
+
+    if (wasRecording && points.length >= 2 && start != null) {
+      try {
+        await BackendService.saveRoute(
+          points: points,
+          mode: _modeString(),
+          startTime: start,
+          endTime: DateTime.now(),
+        );
+        await _loadSavedRoutes();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Маршрут хадгалагдлаа'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (_) {}
+    }
+    if (mounted) setState(() => _recordedPoints = []);
+  }
+
+  Future<void> _clearDestination() async {
+    await _stopRecording();
+    if (mounted) {
+      setState(() {
+        _destination = null;
+        _navRoutePoints = [];
       });
     }
-
-    await _loadSelectedRoute();
   }
 
   @override
   Widget build(BuildContext context) {
-    final routeOptions = _buildRouteOptions();
-    final activeRoute =
-        routeOptions[_selectedRoute] ?? routeOptions[_defaultRoute]!;
-    final routePoints = _activeRoutePoints.isNotEmpty
-        ? _activeRoutePoints
-        : activeRoute.fallbackPoints;
-
     return Scaffold(
       backgroundColor: AppColors.bg1,
       body: Stack(
@@ -107,91 +234,200 @@ class _HomePageState extends State<HomePage> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _currentLocation,
-              initialZoom: 14.5,
+              initialCenter: _location,
+              initialZoom: 14,
+              onTap: (_, latLng) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _setDestination(latLng);
+                });
+              },
             ),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.frontend',
               ),
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: routePoints,
-                    strokeWidth: 6,
-                    color: activeRoute.color,
-                  ),
-                ],
-              ),
+              // Community routes — precomputed, zero allocation in build()
+              if (_communityPolylines.isNotEmpty)
+                PolylineLayer(polylines: _communityPolylines),
+              // OSRM preview route
+              if (_navRoutePoints.isNotEmpty)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _navRoutePoints,
+                      strokeWidth: 5,
+                      color: AppColors.routeBlue,
+                    ),
+                  ],
+                ),
+              // Actual GPS track while recording
+              if (_isRecording && _recordedPoints.length >= 2)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _recordedPoints,
+                      strokeWidth: 4,
+                      color: _modeColor().withValues(alpha: 0.6),
+                    ),
+                  ],
+                ),
               MarkerLayer(
                 markers: [
                   Marker(
-                    point: _currentLocation,
-                    width: 28,
-                    height: 28,
-                    child: _buildLocationDot(),
+                    point: _location,
+                    width: 36,
+                    height: 36,
+                    child: const _LocationDot(),
                   ),
-                  Marker(
-                    point: routePoints.last,
-                    width: 52,
-                    height: 52,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.18),
-                            blurRadius: 16,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.flag_rounded,
-                        color: activeRoute.color,
-                        size: 28,
-                      ),
+                  if (_destination != null)
+                    Marker(
+                      point: _destination!,
+                      width: 40,
+                      height: 48,
+                      child: const Icon(Icons.location_pin,
+                          color: AppColors.danger, size: 48),
+                    ),
+                  ..._obstacles.map(
+                    (o) => Marker(
+                      point: LatLng(o.lat, o.lng),
+                      width: 72,
+                      height: 34,
+                      child: _ObstaclePinWidget(obstacle: o),
                     ),
                   ),
                 ],
               ),
             ],
           ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+
+          // Top gradient overlay
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              height: 200,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xDE1C2130), Colors.transparent],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
+
+          // Top UI
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _buildTopBar(),
+                  const SizedBox(height: 8),
                   _buildSearchBar(context),
-                  const Spacer(),
-                  if (_locationError != null) ...[
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.danger.withValues(alpha: 0.92),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        _locationError!,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                  _buildRouteStatus(activeRoute),
-                  const SizedBox(height: 232),
                 ],
               ),
             ),
           ),
+
+          // Recording status chip — only shown while recording
+          if (_isRecording)
+            Positioned(
+              top: 140,
+              right: 20,
+              child: SafeArea(
+                bottom: false,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.danger.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _PulsingDot(),
+                      SizedBox(width: 6),
+                      Text(
+                        'Бичлэглэж байна',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Bottom panel
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            child: _buildBottomPanel(),
+            child: _buildBottomPanel(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      child: Row(
+        children: [
+          const Text(
+            'UBCab',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.bg2.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: AppColors.success.withValues(alpha: 0.4)),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _GreenDot(),
+                SizedBox(width: 5),
+                Text('28 жолооч',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.bg2.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.notifications_outlined,
+                color: Colors.white, size: 20),
           ),
         ],
       ),
@@ -199,77 +435,93 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSearchBar(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const RouteOptionsPage()),
-      ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.search_rounded, color: AppColors.primary),
-            SizedBox(width: 10),
-            Text(
-              'Хаашаа явах вэ?',
-              style: TextStyle(
-                color: Colors.black54,
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
+    if (_destination != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          height: 50,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
               ),
-            ),
-          ],
+            ],
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.location_pin,
+                  color: AppColors.danger, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${_destination!.latitude.toStringAsFixed(4)}, '
+                  '${_destination!.longitude.toStringAsFixed(4)}',
+                  style: const TextStyle(color: Colors.black87, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              GestureDetector(
+                onTap: _clearDestination,
+                child: const Icon(Icons.close_rounded,
+                    color: AppColors.muted, size: 20),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: GestureDetector(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const RouteOptionsPage()),
+        ),
+        child: Container(
+          height: 50,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.arrow_forward_rounded,
+                  color: AppColors.primary, size: 18),
+              const SizedBox(width: 10),
+              Text(
+                'Хаашаа явах вэ?',
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 15),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildRouteStatus(_RouteOption activeRoute) {
+  Widget _buildBottomPanel(BuildContext context) {
     return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$_selectedRoute маршрут',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _isRouteLoading
-                ? 'Зам тооцоолж байна...'
-                : _routeError ?? activeRoute.description,
-            style: const TextStyle(color: Colors.black54, height: 1.4),
+        color: AppColors.bg2,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 20,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildBottomPanel() {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.bg2,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       child: SafeArea(
         top: false,
@@ -277,449 +529,317 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.bg3,
-                  borderRadius: BorderRadius.circular(2),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.bg3,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 96,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
+              const SizedBox(height: 18),
+              Row(
+                children: List.generate(_modes.length, (i) {
+                  final m = _modes[i];
+                  final active = _selectedMode == i;
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                          right: i < _modes.length - 1 ? 8 : 0),
+                      child: GestureDetector(
+                        onTap: () => setState(() => _selectedMode = i),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color:
+                                active ? AppColors.primary : AppColors.bg3,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(m.icon, color: Colors.white, size: 20),
+                              const SizedBox(height: 4),
+                              Text(
+                                m.label,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 14),
+              if (_destination != null && _isRecording)
+                FilledButton(
+                  onPressed: _stopRecording,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                    minimumSize: const Size(double.infinity, 46),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.stop_circle_rounded,
+                          color: Colors.white, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Аяллыг дуусгах',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_destination != null)
+                FilledButton(
+                  onPressed: _isNavLoading ? null : _startRecording,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    minimumSize: const Size(double.infinity, 46),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _isNavLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.play_circle_rounded,
+                                color: Colors.white, size: 18),
+                            SizedBox(width: 8),
+                            Text(
+                              'Аялал эхлүүлэх',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                )
+              else
+                Row(
                   children: [
-                    _buildActionButton(
-                      icon: Icons.local_taxi_rounded,
-                      label: 'Такси',
-                      color: Colors.amber,
-                      description:
-                          'Таны байршлаас төв замаар шууд очих хурдан чиглэл.',
-                    ),
-                    _buildActionButton(
-                      icon: Icons.people_alt_rounded,
-                      label: 'Shared Ride',
-                      color: Colors.blue,
-                      description:
-                          'Замдаа rider авах боломжтой нийлмэл цэгүүдтэй маршрут.',
-                    ),
-                    _buildActionButton(
-                      icon: Icons.shield_rounded,
-                      label: 'Safe Route',
-                      color: Colors.green,
-                      description: _safeRouteDescription(),
-                      onTap: _showSafeRouteOptions,
-                    ),
-                    _buildActionButton(
-                      icon: Icons.sos_rounded,
-                      label: 'SOS',
-                      color: Colors.red,
-                      description:
-                          'Хамгийн ойр emergency цэг рүү хурдан хүрэх маршрут.',
+                    const Icon(Icons.location_on_rounded,
+                        color: AppColors.primary, size: 14),
+                    const SizedBox(width: 5),
+                    const Text('Байршил тогтоогдлоо',
+                        style: TextStyle(
+                            color: AppColors.muted, fontSize: 12)),
+                    const Spacer(),
+                    Text(
+                      '${_obstacles.length} саад ойролцоо',
+                      style: const TextStyle(
+                          color: AppColors.warning,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  const Icon(
-                    Icons.location_on_rounded,
-                    color: AppColors.primary,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _locationError == null
-                        ? 'Байршил тогтоогдлоо'
-                        : 'Default байршил ашиглаж байна',
-                    style: const TextStyle(
-                      color: AppColors.muted,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    _selectedRoute == 'Safe Route'
-                        ? _selectedSafeMode
-                        : 'Маршрут бэлэн',
-                    style: const TextStyle(
-                      color: AppColors.warning,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required String description,
-    Future<void> Function()? onTap,
-  }) {
-    final isSelected = _selectedRoute == label;
-
-    return Padding(
-      padding: const EdgeInsets.only(right: 12),
-      child: GestureDetector(
-        onTap: () async {
-          if (onTap != null) {
-            await onTap();
-            return;
-          }
-
-          await _selectRoute(label);
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          width: 156,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isSelected ? color : AppColors.bg3,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: isSelected ? color : AppColors.bg3,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: isSelected ? 0.18 : 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: Colors.white, size: 20),
-              ),
-              const Spacer(),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.82),
-                  fontSize: 11,
-                  height: 1.3,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLocationDot() {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: AppColors.primary,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.35),
-            blurRadius: 12,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _selectRoute(String label) async {
-    setState(() {
-      _selectedRoute = label;
-    });
-
-    await _loadSelectedRoute();
-  }
-
-  Future<void> _showSafeRouteOptions() async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        const options = [
-          (
-            label: 'Машинтай',
-            subtitle: 'Автомашинд тохирсон өргөн, аюулгүй зам',
-            icon: Icons.directions_car_filled_rounded,
-          ),
-          (
-            label: 'Явган',
-            subtitle: 'Явган хүнд илүү аюулгүй, гэрэлтүүлэгтэй зам',
-            icon: Icons.directions_walk_rounded,
-          ),
-          (
-            label: 'Хөгжлийн бэрхшээлтэй',
-            subtitle: 'Саад багатай, хүртээмж харгалзсан зам',
-            icon: Icons.accessible_forward_rounded,
-          ),
-        ];
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Center(
-                  child: Text(
-                    'Safe Route төрөл',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                for (final option in options)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(option.icon, color: AppColors.primary),
-                    ),
-                    title: Text(
-                      option.label,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(option.subtitle),
-                    trailing: _selectedSafeMode == option.label
-                        ? const Icon(Icons.check_circle, color: AppColors.primary)
-                        : null,
-                    onTap: () => Navigator.of(context).pop(option.label),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (selected == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _selectedSafeMode = selected;
-      _selectedRoute = 'Safe Route';
-    });
-
-    await _loadSelectedRoute();
-  }
-
-  Future<void> _loadSelectedRoute() async {
-    final routeOptions = _buildRouteOptions();
-    final activeRoute =
-        routeOptions[_selectedRoute] ?? routeOptions[_defaultRoute]!;
-    final fallbackPoints = activeRoute.fallbackPoints;
-
-    setState(() {
-      _isRouteLoading = true;
-      _routeError = null;
-      _activeRoutePoints = fallbackPoints;
-    });
-
-    try {
-      final routes = await RoutingService.fetchRoutes(
-        start: _currentLocation,
-        end: fallbackPoints.last,
-        profile: activeRoute.profile,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _activeRoutePoints = routes.first.points;
-        _isRouteLoading = false;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _activeRoutePoints = fallbackPoints;
-        _isRouteLoading = false;
-        _routeError =
-            'Жинхэнэ зам ачаалж чадсангүй. Түр fallback route үзүүлж байна.';
-      });
-    }
-
-    _focusRoute();
-  }
-
-  void _focusRoute() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-
-      final routeOptions = _buildRouteOptions();
-      final activeRoute =
-          routeOptions[_selectedRoute] ?? routeOptions[_defaultRoute]!;
-      final points = _activeRoutePoints.isNotEmpty
-          ? _activeRoutePoints
-          : activeRoute.fallbackPoints;
-
-      _mapController.move(points[points.length ~/ 2], 14.2);
-    });
-  }
-
-  Map<String, _RouteOption> _buildRouteOptions() {
-    return {
-      'Такси': _RouteOption(
-        color: Colors.amber,
-        description: 'Таны байршлаас төв замаар шууд очих хурдан чиглэл.',
-        profile: 'driving-car',
-        fallbackPoints: _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0030, 0.0080],
-          [0.0070, 0.0180],
-          [0.0110, 0.0290],
-        ]),
-      ),
-      'Shared Ride': _RouteOption(
-        color: Colors.blue,
-        description: 'Замдаа rider авах боломжтой нийлмэл цэгүүдтэй маршрут.',
-        profile: 'driving-car',
-        fallbackPoints: _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0045, 0.0050],
-          [0.0060, 0.0150],
-          [0.0095, 0.0240],
-          [0.0130, 0.0320],
-        ]),
-      ),
-      'Safe Route': _RouteOption(
-        color: Colors.green,
-        description: _safeRouteDescription(),
-        profile: _safeRouteProfile(),
-        fallbackPoints: _safeRoutePoints(),
-      ),
-      'SOS': _RouteOption(
-        color: Colors.red,
-        description: 'Хамгийн ойр emergency цэг рүү хурдан хүрэх маршрут.',
-        profile: 'driving-car',
-        fallbackPoints: _routePoints(const [
-          [0.0000, 0.0000],
-          [-0.0020, 0.0070],
-          [-0.0035, 0.0140],
-          [-0.0015, 0.0210],
-        ]),
-      ),
-    };
-  }
-
-  List<LatLng> _routePoints(List<List<double>> offsets) {
-    return offsets
-        .map(
-          (offset) => LatLng(
-            _currentLocation.latitude + offset[0],
-            _currentLocation.longitude + offset[1],
-          ),
-        )
-        .toList();
-  }
-
-  List<LatLng> _safeRoutePoints() {
-    switch (_selectedSafeMode) {
-      case 'Машинтай':
-        return _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0030, 0.0110],
-          [0.0065, 0.0200],
-          [0.0100, 0.0310],
-        ]);
-      case 'Хөгжлийн бэрхшээлтэй':
-        return _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0015, 0.0080],
-          [0.0035, 0.0150],
-          [0.0060, 0.0220],
-          [0.0080, 0.0290],
-        ]);
-      case 'Явган':
-      default:
-        return _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0020, 0.0100],
-          [0.0050, 0.0200],
-          [0.0080, 0.0260],
-          [0.0120, 0.0360],
-        ]);
-    }
-  }
-
-  String _safeRouteDescription() {
-    switch (_selectedSafeMode) {
-      case 'Машинтай':
-        return 'Машинтай зорчигчид зориулсан, камер ба гэрэлтүүлэг сайтай гол замын чиглэл.';
-      case 'Хөгжлийн бэрхшээлтэй':
-        return 'Налуу зам, гарц, саад багатай хэсгүүдийг илүү харгалзсан аюулгүй чиглэл.';
-      case 'Явган':
-      default:
-        return 'Явган зорчигчид зориулсан, гэрэлтүүлэгтэй гол замууд дагасан аюулгүй чиглэл.';
-    }
-  }
-
-  String _safeRouteProfile() {
-    switch (_selectedSafeMode) {
-      case 'Хөгжлийн бэрхшээлтэй':
-        return 'wheelchair';
-      case 'Машинтай':
-        return 'driving-car';
-      case 'Явган':
-      default:
-        return 'foot-walking';
-    }
   }
 }
 
-class _RouteOption {
-  const _RouteOption({
-    required this.color,
-    required this.description,
-    required this.profile,
-    required this.fallbackPoints,
-  });
+// ── Isolated animation widgets — own their AnimationControllers ───────────────
 
+class _LocationDot extends StatefulWidget {
+  const _LocationDot();
+
+  @override
+  State<_LocationDot> createState() => _LocationDotState();
+}
+
+class _LocationDotState extends State<_LocationDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+    _anim = Tween<double>(begin: 1.0, end: 2.2).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        AnimatedBuilder(
+          animation: _anim,
+          builder: (_, child) => Transform.scale(
+            scale: _anim.value,
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.primary
+                    .withValues(alpha: (1 - _ctrl.value) * 0.35),
+              ),
+            ),
+          ),
+        ),
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.5),
+                blurRadius: 8,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PulsingDot extends StatelessWidget {
+  const _PulsingDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+class _GreenDot extends StatelessWidget {
+  const _GreenDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: const BoxDecoration(
+        color: AppColors.success,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+// ── Obstacle marker widgets ───────────────────────────────────────────────────
+
+enum _ObstacleType { ice, construction, congestion, accident }
+
+class _Obstacle {
+  final double lat;
+  final double lng;
+  final _ObstacleType type;
+  final String label;
+  const _Obstacle(this.lat, this.lng, this.type, this.label);
+}
+
+class _ObstaclePinWidget extends StatelessWidget {
+  final _Obstacle obstacle;
+  const _ObstaclePinWidget({required this.obstacle});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (obstacle.type) {
+      _ObstacleType.ice => const Color(0xFF4DD0E1),
+      _ObstacleType.construction => AppColors.warning,
+      _ObstacleType.congestion => AppColors.gold,
+      _ObstacleType.accident => AppColors.danger,
+    };
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(7),
+            boxShadow: [
+              BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 6),
+            ],
+          ),
+          child: Text(
+            obstacle.label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        CustomPaint(
+          size: const Size(10, 5),
+          painter: _TrianglePainter(color),
+        ),
+      ],
+    );
+  }
+}
+
+class _TrianglePainter extends CustomPainter {
   final Color color;
-  final String description;
-  final String profile;
-  final List<LatLng> fallbackPoints;
+  const _TrianglePainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final path = ui.Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..lineTo(size.width, 0)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }
