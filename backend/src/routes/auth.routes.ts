@@ -7,7 +7,9 @@ const router = express.Router();
 router.post("/register", async (req: Request, res: Response) => {
   try {
     const name = String(req.body.name ?? "").trim();
-    const email = String(req.body.email ?? "").trim().toLowerCase();
+    const email = String(req.body.email ?? "")
+      .trim()
+      .toLowerCase();
     const password = String(req.body.password ?? "");
 
     if (!name || !email || !password) {
@@ -61,7 +63,9 @@ router.post("/register", async (req: Request, res: Response) => {
 
 router.post("/login", async (req: Request, res: Response) => {
   try {
-    const email = String(req.body.email ?? "").trim().toLowerCase();
+    const email = String(req.body.email ?? "")
+      .trim()
+      .toLowerCase();
     const password = String(req.body.password ?? "");
 
     if (!email || !password) {
@@ -91,6 +95,22 @@ router.post("/login", async (req: Request, res: Response) => {
 
     return res.status(500).json({
       message: "Нэвтрэх үед алдаа гарлаа.",
+    });
+  }
+});
+
+router.get("/users", async (_req: Request, res: Response) => {
+  try {
+    const users = await AuthUser.find().select("-passwordHash");
+
+    return res.status(200).json({
+      users,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Хэрэглэгчдийн мэдээлэл авах үед алдаа гарлаа.",
     });
   }
 });

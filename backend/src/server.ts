@@ -5,6 +5,7 @@ import os from "os";
 
 import connectDB from "./config/db";
 import authRoutes from "./routes/auth.routes";
+import reportRoutes from "./routes/report.routes";
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ const host = process.env.HOST || "0.0.0.0";
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes);
+app.use("/api/reports", reportRoutes);
 
 app.get("/", (_req, res) => {
   res.json({
