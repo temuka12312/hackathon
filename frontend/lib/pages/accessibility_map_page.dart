@@ -116,14 +116,14 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
         _isNavLoading = true;
       });
       try {
-        final points = await RoutingService.fetchRoute(
+        final points = await RoutingService.fetchRoutes(
           start: _location,
           end: dest,
           profile: 'foot',
         );
         if (!mounted) return;
         setState(() {
-          _navRoutePoints = points;
+          _navRoutePoints = points.cast<LatLng>();
           _isNavLoading = false;
         });
       } catch (_) {
