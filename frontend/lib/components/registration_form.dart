@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class RegistrationForm extends StatelessWidget {
+class RegistrationForm extends StatefulWidget {
   const RegistrationForm({
     super.key,
     required this.formKey,
@@ -23,88 +23,116 @@ class RegistrationForm extends StatelessWidget {
   final bool succeeded;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  State<RegistrationForm> createState() => _RegistrationFormState();
+}
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Шинэ хэрэглэгч бүртгэх',
-                style: theme.textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Нэр',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Нэрээ оруулна уу';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Имэйл',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  final text = value?.trim() ?? '';
-                  if (text.isEmpty) {
-                    return 'Имэйлээ оруулна уу';
-                  }
-                  if (!text.contains('@')) {
-                    return 'Зөв имэйл оруулна уу';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Нууц үг',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.length < 6) {
-                    return 'Нууц үг 6-аас дээш тэмдэгттэй байна';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: isSubmitting ? null : onSubmit,
-                child: Text(isSubmitting ? 'Бүртгэж байна...' : 'Бүртгэх'),
-              ),
-              if (message != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  message!,
-                  style: TextStyle(
-                    color: succeeded
-                        ? Colors.green.shade700
-                        : theme.colorScheme.error,
-                  ),
-                ),
-              ],
-            ],
+class _RegistrationFormState extends State<RegistrationForm> {
+  bool _passwordVisible = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: widget.formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextFormField(
+            controller: widget.nameController,
+            decoration: const InputDecoration(
+              labelText: 'Нэр',
+              prefixIcon: Icon(Icons.person_outline),
+            ),
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Нэрээ оруулна уу';
+              }
+              return null;
+            },
           ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: widget.emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Имэйл',
+              prefixIcon: Icon(Icons.email_outlined),
+            ),
+            validator: (value) {
+              final text = value?.trim() ?? '';
+              if (text.isEmpty) return 'Имэйлээ оруулна уу';
+              if (!text.contains('@')) return 'Зөв имэйл оруулна уу';
+              return null;
+            },
+          ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: widget.passwordController,
+            obscureText: !_passwordVisible,
+            decoration: InputDecoration(
+              labelText: 'Нууц үг',
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _passwordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+                onPressed: () =>
+                    setState(() => _passwordVisible = !_passwordVisible),
+              ),
+            ),
+            validator: (value) {
+              if (value == null || value.length < 6) {
+                return 'Нууц үг 6-аас дээш тэмдэгттэй байна';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: widget.isSubmitting ? null : widget.onSubmit,
+            child: Text(
+              widget.isSubmitting ? 'Бүртгэж байна...' : 'Бүртгэх',
+            ),
+          ),
+          if (widget.message != null) ...[
+            const SizedBox(height: 12),
+            _buildMessageBanner(widget.message!, widget.succeeded),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageBanner(String message, bool isSuccess) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color:
+              (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.25),
         ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isSuccess ? Icons.check_circle_outline : Icons.error_outline,
+            color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -2,9 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../models/backend_response.dart';
 import '../models/login_response.dart';
-import '../models/register_response.dart';
+import '../models/auth_response.dart';
 import 'api_client.dart';
 
 class BackendService {
@@ -12,19 +11,7 @@ class BackendService {
 
   static String get baseUrl => ApiClient.baseUrl;
 
-  static Future<BackendResponse> fetchHealth() async {
-    final uri = Uri.parse('$baseUrl/api/health');
-    final response = await http.get(uri);
-
-    if (response.statusCode != 200) {
-      throw Exception('Backend returned ${response.statusCode}');
-    }
-
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    return BackendResponse.fromJson(json);
-  }
-
-  static Future<RegisterResponse> registerUser({
+  static Future<AuthResponse> registerUser({
     required String name,
     required String email,
     required String password,
@@ -61,7 +48,7 @@ class BackendService {
       );
     }
 
-    return RegisterResponse.fromJson(json);
+    return AuthResponse.fromJson(json);
   }
 
   static Future<LoginResponse> loginUser({

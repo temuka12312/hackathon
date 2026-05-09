@@ -1,12 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:frontend/app.dart';
-import 'package:frontend/pages/home_page.dart';
 
 void main() {
-  testWidgets('renders home page', (WidgetTester tester) async {
+  testWidgets('renders onboarding screen', (WidgetTester tester) async {
     await tester.pumpWidget(const App());
 
-    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.text('Саад мэдээлэх'), findsOneWidget);
+    expect(find.text('Report road obstacles'), findsOneWidget);
+    expect(find.text('Үргэлжлүүлэх'), findsOneWidget);
   });
 }

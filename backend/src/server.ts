@@ -6,6 +6,8 @@ import os from "os";
 import connectDB from "./config/db";
 import authRoutes from "./routes/auth.routes";
 import reportRoutes from "./routes/report.routes";
+import registerRoutes from "./routes";
+import tripRoutes from "./routes/trip.routes";
 
 dotenv.config();
 
@@ -20,6 +22,8 @@ app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/trip", tripRoutes);
+registerRoutes(app);
 
 app.get("/", (_req, res) => {
   res.json({
