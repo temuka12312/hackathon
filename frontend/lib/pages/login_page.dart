@@ -51,7 +51,7 @@ class _LoginPageState extends State<LoginPage> {
 
       setState(() {
         _isSuccess = true;
-        _message = result.name == null
+        _message = result.name.isEmpty
             ? result.message
             : '${result.message} ${result.name}';
       });
