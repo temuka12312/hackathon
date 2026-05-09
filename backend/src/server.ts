@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import os from "os";
 
 import connectDB from "./config/db";
 import authRoutes from "./routes/auth.routes";
@@ -12,6 +13,7 @@ connectDB();
 const app = express();
 
 const port = Number(process.env.PORT) || 3000;
+const host = process.env.HOST || "0.0.0.0";
 
 app.use(cors());
 app.use(express.json());
@@ -31,6 +33,21 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Backend listening on http://localhost:${port}`);
+app.listen(port, host, () => {
+  const networkInterfaces = os.networkInterfaces();
+  const localIps = Object.values(networkInterfaces)
+    .flat()
+    .filter((detail) => detail?.family === "IPv4" && !detail.internal)
+    .map((detail) => detail!.address);
+
+  console.log(`Backend listening on http://${host}:${port}`);
+  console.log(`Local access: http://localhost:${port}`);
+
+  if (localIps.length > 0) {
+    console.log(
+      `Device access: ${localIps
+        .map((ip) => `http://${ip}:${port}`)
+        .join(", ")}`,
+    );
+  }
 });
