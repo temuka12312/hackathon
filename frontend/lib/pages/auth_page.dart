@@ -1,8 +1,12 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 import '../api/backend_service.dart';
-import '../components/registration_form.dart';
+import '../components/auth_status_banner.dart';
+import '../components/auth_text_field.dart';
 import '../models/login_response.dart';
+import '../theme/app_colors.dart';
 import '../widgets/main_scaffold.dart';
 
 class AuthPage extends StatefulWidget {
@@ -17,25 +21,20 @@ class _AuthPageState extends State<AuthPage> {
 
   final GlobalKey<FormState> _registerFormKey = GlobalKey<FormState>();
   final TextEditingController _registerNameController = TextEditingController();
-  final TextEditingController _registerEmailController =
-      TextEditingController();
-  final TextEditingController _registerPasswordController =
-      TextEditingController();
+  final TextEditingController _registerEmailController = TextEditingController();
+  final TextEditingController _registerPasswordController = TextEditingController();
 
   final GlobalKey<FormState> _loginFormKey = GlobalKey<FormState>();
   final TextEditingController _loginEmailController = TextEditingController();
-  final TextEditingController _loginPasswordController =
-      TextEditingController();
-  bool _loginPasswordVisible = false;
+  final TextEditingController _loginPasswordController = TextEditingController();
 
+  bool _loginPasswordVisible = false;
+  bool _registerPasswordVisible = false;
   bool _isRegisterSubmitting = false;
   bool _isLoginSubmitting = false;
   String? _registerMessage;
   bool _registerSucceeded = false;
   String? _loginMessage;
-
-  static const _primaryBlue = Color(0xFF1A56DB);
-  static const _darkNavy = Color(0xFF0D1B4B);
 
   @override
   void dispose() {
@@ -49,7 +48,9 @@ class _AuthPageState extends State<AuthPage> {
 
   Future<void> _submitRegistration() async {
     final form = _registerFormKey.currentState;
-    if (form == null || !form.validate()) return;
+    if (form == null || !form.validate()) {
+      return;
+    }
 
     setState(() {
       _isRegisterSubmitting = true;
@@ -63,25 +64,35 @@ class _AuthPageState extends State<AuthPage> {
         email: _registerEmailController.text.trim(),
         password: _registerPasswordController.text,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
         _registerSucceeded = true;
         _registerMessage = response.message;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
         _registerSucceeded = false;
         _registerMessage = error.toString().replaceFirst('Exception: ', '');
       });
     } finally {
-      if (mounted) setState(() => _isRegisterSubmitting = false);
+      if (mounted) {
+        setState(() => _isRegisterSubmitting = false);
+      }
     }
   }
 
   Future<void> _submitLogin() async {
     final form = _loginFormKey.currentState;
-    if (form == null || !form.validate()) return;
+    if (form == null || !form.validate()) {
+      return;
+    }
 
     setState(() {
       _isLoginSubmitting = true;
@@ -89,16 +100,17 @@ class _AuthPageState extends State<AuthPage> {
     });
 
     try {
-      final LoginResponse _ = await BackendService.loginUser(
-        email: _loginEmailController.text.trim(),
-        password: _loginPasswordController.text,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const MainScaffold()),
-      );
+      final LoginResponse _ = await BackendService.loginUser(email: _loginEmailController.text.trim(), password: _loginPasswordController.text);
+      if (!mounted) {
+        return;
+      }
+
+      Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => const MainScaffold()));
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
         _isLoginSubmitting = false;
         _loginMessage = error.toString().replaceFirst('Exception: ', '');
@@ -108,166 +120,124 @@ class _AuthPageState extends State<AuthPage> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
+    final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: _darkNavy,
-      resizeToAvoidBottomInset: true,
-      body: Column(
-        children: [
-          SizedBox(
-            height: screenHeight * 0.34,
-            child: _buildBrandSection(),
+      backgroundColor: AppColors.bg1,
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF07080A), Color(0xFF131519), Color(0xFF1B2220)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          Expanded(child: _buildFormSection()),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBrandSection() {
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_darkNavy, _primaryBlue],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
         ),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 66,
-                height: 66,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.3),
-                    width: 1.5,
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildHero(theme),
+                      const SizedBox(height: 24),
+                      _GlassPanel(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildToggle(),
+                            const SizedBox(height: 28),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 280),
+                              switchInCurve: Curves.easeOutCubic,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: SlideTransition(
+                                    position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: _showLogin ? _buildLoginForm(theme) : _buildRegisterForm(theme),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: const Icon(
-                  Icons.route_rounded,
-                  color: Colors.white,
-                  size: 36,
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'UBCab',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                'Ухаалаг замнал • Аюулгүй хот',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.65),
-                  fontSize: 13,
-                ),
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildFormSection() {
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildTabToggle(),
-            const SizedBox(height: 24),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              transitionBuilder: (child, animation) =>
-                  FadeTransition(opacity: animation, child: child),
-              child: _showLogin
-                  ? _buildLoginForm()
-                  : RegistrationForm(
-                      key: const ValueKey('register'),
-                      formKey: _registerFormKey,
-                      nameController: _registerNameController,
-                      emailController: _registerEmailController,
-                      passwordController: _registerPasswordController,
-                      isSubmitting: _isRegisterSubmitting,
-                      onSubmit: _submitRegistration,
-                      message: _registerMessage,
-                      succeeded: _registerSucceeded,
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabToggle() {
-    return Container(
-      height: 46,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
+  Widget _buildHero(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 20, 4, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _tabItem('Нэвтрэх', true),
-          const SizedBox(width: 4),
-          _tabItem('Бүртгүүлэх', false),
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            ),
+            child: const Icon(Icons.directions_car_filled_rounded, color: Colors.white, size: 28),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Move through Ulaanbaatar with a cleaner, faster booking flow.',
+            style: theme.textTheme.headlineMedium?.copyWith(color: Colors.white, height: 1.02),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Book rides, monitor safer routes, and keep the map experience focused on motion instead of clutter.',
+            style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white.withValues(alpha: 0.68)),
+          ),
         ],
       ),
     );
   }
 
-  Widget _tabItem(String label, bool isLogin) {
-    final isActive = _showLogin == isLogin;
+  Widget _buildToggle() {
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(color: AppColors.lightSurface, borderRadius: BorderRadius.circular(24)),
+      child: Row(
+        children: [
+          _toggleItem(label: 'Нэвтрэх', isLogin: true),
+          const SizedBox(width: 6),
+          _toggleItem(label: 'Бүртгүүлэх', isLogin: false),
+        ],
+      ),
+    );
+  }
+
+  Widget _toggleItem({required String label, required bool isLogin}) {
+    final active = _showLogin == isLogin;
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _showLogin = isLogin),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: isActive ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: isActive
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(color: active ? AppColors.primary : Colors.transparent, borderRadius: BorderRadius.circular(20)),
           child: Center(
             child: Text(
               label,
-              style: TextStyle(
-                color: isActive ? _primaryBlue : Colors.black54,
-                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 14,
-              ),
+              style: TextStyle(color: active ? Colors.white : AppColors.textSecondary, fontWeight: FontWeight.w700, fontSize: 14),
             ),
           ),
         ),
@@ -275,24 +245,30 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
-  Widget _buildLoginForm() {
+  Widget _buildLoginForm(ThemeData theme) {
     return Form(
       key: _loginFormKey,
       child: Column(
         key: const ValueKey('login'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextFormField(
+          Text('Тавтай морил', style: theme.textTheme.headlineSmall),
+          const SizedBox(height: 8),
+          Text('Sign in to manage rides, alerts, and destination history in one place.', style: theme.textTheme.bodyLarge),
+          const SizedBox(height: 22),
+          AuthTextField(
             controller: _loginEmailController,
+            label: 'Имэйл',
+            hint: 'name@example.com',
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'Имэйл',
-              prefixIcon: Icon(Icons.email_outlined),
-            ),
-            validator: (v) {
-              final t = v?.trim() ?? '';
-              if (t.isEmpty) return 'Имэйлээ оруулна уу';
-              if (!t.contains('@')) return 'Зөв имэйл оруулна уу';
+            validator: (value) {
+              final text = value?.trim() ?? '';
+              if (text.isEmpty) {
+                return 'Имэйлээ оруулна уу';
+              }
+              if (!text.contains('@')) {
+                return 'Зөв имэйл оруулна уу';
+              }
               return null;
             },
           ),
@@ -300,68 +276,132 @@ class _AuthPageState extends State<AuthPage> {
           TextFormField(
             controller: _loginPasswordController,
             obscureText: !_loginPasswordVisible,
-            decoration: InputDecoration(
-              labelText: 'Нууц үг',
-              prefixIcon: const Icon(Icons.lock_outline),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _loginPasswordVisible
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                ),
-                onPressed: () => setState(
-                  () => _loginPasswordVisible = !_loginPasswordVisible,
-                ),
-              ),
-            ),
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Нууц үгээ оруулна уу';
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return 'Нууц үгээ оруулна уу';
+              }
               return null;
             },
+            decoration: InputDecoration(
+              labelText: 'Нууц үг',
+              hintText: 'Таны нууц үг',
+              fillColor: AppColors.lightSurface,
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() => _loginPasswordVisible = !_loginPasswordVisible);
+                },
+                icon: Icon(_loginPasswordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+              ),
+            ),
           ),
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: _isLoginSubmitting ? null : _submitLogin,
-            child: Text(_isLoginSubmitting ? 'Нэвтэрч байна...' : 'Нэвтрэх'),
+          const SizedBox(height: 18),
+          if (_loginMessage != null) ...[AuthStatusBanner(message: _loginMessage!, isSuccess: false), const SizedBox(height: 18)],
+          FilledButton(onPressed: _isLoginSubmitting ? null : _submitLogin, child: Text(_isLoginSubmitting ? 'Нэвтэрч байна...' : 'Нэвтрэх')),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.center,
+            child: Text('Fast access for trips, reports, and account activity.', style: theme.textTheme.bodyMedium),
           ),
-          if (_loginMessage != null) ...[
-            const SizedBox(height: 12),
-            _buildMessageBanner(_loginMessage!, false),
-          ],
         ],
       ),
     );
   }
 
-  Widget _buildMessageBanner(String message, bool isSuccess) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color:
-              (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.25),
-        ),
-      ),
-      child: Row(
+  Widget _buildRegisterForm(ThemeData theme) {
+    return Form(
+      key: _registerFormKey,
+      child: Column(
+        key: const ValueKey('register'),
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            isSuccess ? Icons.check_circle_outline : Icons.error_outline,
-            color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
-            size: 18,
+          Text('Шинэ бүртгэл', style: theme.textTheme.headlineSmall),
+          const SizedBox(height: 8),
+          Text('Create one account to book rides, report road issues, and keep your saved destinations synced.', style: theme.textTheme.bodyLarge),
+          const SizedBox(height: 22),
+          AuthTextField(
+            controller: _registerNameController,
+            label: 'Нэр',
+            hint: 'Таны бүтэн нэр',
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Нэрээ оруулна уу';
+              }
+              return null;
+            },
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
-                fontSize: 13,
+          const SizedBox(height: 14),
+          AuthTextField(
+            controller: _registerEmailController,
+            label: 'Имэйл',
+            hint: 'name@example.com',
+            keyboardType: TextInputType.emailAddress,
+            validator: (value) {
+              final text = value?.trim() ?? '';
+              if (text.isEmpty) {
+                return 'Имэйлээ оруулна уу';
+              }
+              if (!text.contains('@')) {
+                return 'Зөв имэйл оруулна уу';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: _registerPasswordController,
+            obscureText: !_registerPasswordVisible,
+            validator: (value) {
+              if (value == null || value.length < 6) {
+                return 'Нууц үг 6-аас дээш тэмдэгттэй байна';
+              }
+              return null;
+            },
+            decoration: InputDecoration(
+              labelText: 'Нууц үг',
+              hintText: 'Доод тал нь 6 тэмдэгт',
+              fillColor: AppColors.lightSurface,
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() => _registerPasswordVisible = !_registerPasswordVisible);
+                },
+                icon: Icon(_registerPasswordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
               ),
             ),
           ),
+          const SizedBox(height: 18),
+          if (_registerMessage != null) ...[AuthStatusBanner(message: _registerMessage!, isSuccess: _registerSucceeded), const SizedBox(height: 18)],
+          FilledButton(
+            onPressed: _isRegisterSubmitting ? null : _submitRegistration,
+            child: Text(_isRegisterSubmitting ? 'Бүртгэж байна...' : 'Бүртгэл үүсгэх'),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _GlassPanel extends StatelessWidget {
+  const _GlassPanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(34),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(34),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 34, offset: const Offset(0, 18))],
+          ),
+          child: child,
+        ),
       ),
     );
   }

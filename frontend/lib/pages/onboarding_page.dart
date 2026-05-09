@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
 import '../theme/app_colors.dart';
 import 'auth_page.dart';
 
@@ -17,24 +18,27 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   static const _slides = [
     _Slide(
-      title: 'Саад мэдээлэх',
-      subtitle: 'Report road obstacles',
-      body: 'Замын саадуудыг бусдад мэдэгдэж,\nаюулгүй замнахад тусал.',
+      eyebrow: 'Live road awareness',
+      title: 'Report obstacles in seconds.',
+      body:
+          'Share blocked roads, hazards, and congestion signals with a ride flow that stays clean and immediate.',
       icon: Icons.warning_amber_rounded,
       color: AppColors.warning,
     ),
     _Slide(
-      title: 'Аюулгүй зам',
-      subtitle: 'Safe routing',
-      body: 'Саад мэдээллийг ашиглан хамгийн\nаюулгүй замыг сонго.',
-      icon: Icons.route_rounded,
-      color: AppColors.routeBlue,
+      eyebrow: 'Smarter motion',
+      title: 'Choose safer routes with less friction.',
+      body:
+          'Keep the map clear, compare route context faster, and start each trip from a more confident view.',
+      icon: Icons.alt_route_rounded,
+      color: AppColors.accent,
     ),
     _Slide(
-      title: 'Оноо цуглуулах',
-      subtitle: 'Earn rewards',
-      body: 'Мэдээлэл илгээх тутамд оноо\nцуглуулж, шагнал ав.',
-      icon: Icons.emoji_events_rounded,
+      eyebrow: 'Rewards layer',
+      title: 'Turn local insight into points.',
+      body:
+          'Contribute traffic and accessibility updates, then track streaks, trust, and rider reputation in one account.',
+      icon: Icons.workspace_premium_rounded,
       color: AppColors.gold,
     ),
   ];
@@ -42,14 +46,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
   void _next() {
     if (_page < _slides.length - 1) {
       _controller.nextPage(
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeInOut,
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeOutCubic,
       );
-    } else {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const AuthPage()),
-      );
+      return;
     }
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => const AuthPage()),
+    );
   }
 
   @override
@@ -60,135 +65,144 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       backgroundColor: AppColors.bg1,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                onPageChanged: (i) => setState(() => _page = i),
-                itemCount: _slides.length,
-                itemBuilder: (_, i) => _buildSlide(_slides[i]),
-              ),
-            ),
-            _buildDots(),
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: FilledButton(
-                onPressed: _next,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  minimumSize: const Size(double.infinity, 52),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  _page == _slides.length - 1 ? 'Эхлэх' : 'Үргэлжлүүлэх',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 40),
-          ],
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF060709), Color(0xFF121417), Color(0xFF090A0C)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSlide(_Slide slide) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        children: [
-          const Spacer(flex: 1),
-          // Illustration area
-          Container(
-            width: double.infinity,
-            height: 300,
-            decoration: BoxDecoration(
-              color: AppColors.bg2,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                  color: slide.color.withValues(alpha: 0.2)),
-            ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CustomPaint(
-                  size: const Size(220, 110),
-                  painter: _CityMapPainter(slide.color),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.directions_car_filled_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'UBCab',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: _next,
+                      child: Text(
+                        _page == _slides.length - 1 ? 'Эхлэх' : 'Алгасах',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 20),
-                Container(
-                  width: 68,
-                  height: 68,
-                  decoration: BoxDecoration(
-                    color: slide.color.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: slide.color.withValues(alpha: 0.4)),
+                const SizedBox(height: 24),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _controller,
+                    onPageChanged: (index) => setState(() => _page = index),
+                    itemCount: _slides.length,
+                    itemBuilder: (_, index) {
+                      final slide = _slides[index];
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _HeroCard(slide: slide)),
+                          const SizedBox(height: 28),
+                          Text(
+                            slide.eyebrow,
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            slide.title,
+                            style: theme.textTheme.headlineLarge?.copyWith(
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            slide.body,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.66),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  child: Icon(slide.icon, color: slide.color, size: 34),
+                ),
+                const SizedBox(height: 28),
+                Row(
+                  children: [
+                    _buildDots(),
+                    const Spacer(),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _next,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.textPrimary,
+                        ),
+                        child: Text(
+                          _page == _slides.length - 1 ? 'Continue' : 'Next',
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          const Spacer(flex: 1),
-          Text(
-            slide.title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            slide.subtitle,
-            style: const TextStyle(
-              color: AppColors.primary,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            slide.body,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.muted,
-              fontSize: 15,
-              height: 1.6,
-            ),
-          ),
-          const Spacer(flex: 2),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildDots() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(_slides.length, (i) {
-        final active = i == _page;
+      children: List.generate(_slides.length, (index) {
+        final active = _page == index;
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: active ? 24 : 8,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          width: active ? 28 : 8,
           height: 8,
-          margin: const EdgeInsets.symmetric(horizontal: 4),
+          margin: const EdgeInsets.only(right: 8),
           decoration: BoxDecoration(
-            color: active ? AppColors.primary : AppColors.bg3,
-            borderRadius: BorderRadius.circular(4),
+            color: active ? Colors.white : Colors.white24,
+            borderRadius: BorderRadius.circular(99),
           ),
         );
       }),
@@ -196,80 +210,134 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 }
 
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({required this.slide});
+
+  final _Slide slide;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(34),
+        gradient: LinearGradient(
+          colors: [
+            Colors.white.withValues(alpha: 0.07),
+            slide.color.withValues(alpha: 0.14),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Stack(
+        children: [
+          Align(
+            alignment: Alignment.topRight,
+            child: Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Icon(slide.icon, color: Colors.white, size: 30),
+            ),
+          ),
+          Align(
+            alignment: Alignment.center,
+            child: CustomPaint(
+              size: const Size(280, 220),
+              painter: _RouteCanvasPainter(slide.color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Slide {
-  final String title;
-  final String subtitle;
-  final String body;
-  final IconData icon;
-  final Color color;
   const _Slide({
+    required this.eyebrow,
     required this.title,
-    required this.subtitle,
     required this.body,
     required this.icon,
     required this.color,
   });
+
+  final String eyebrow;
+  final String title;
+  final String body;
+  final IconData icon;
+  final Color color;
 }
 
-class _CityMapPainter extends CustomPainter {
+class _RouteCanvasPainter extends CustomPainter {
+  const _RouteCanvasPainter(this.color);
+
   final Color color;
-  const _CityMapPainter(this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final grid = Paint()
-      ..color = color.withValues(alpha: 0.25)
-      ..strokeWidth = 1.5
+    final street = Paint()
+      ..color = Colors.white.withValues(alpha: 0.12)
+      ..strokeWidth = 1.4
       ..style = ui.PaintingStyle.stroke;
 
-    // Horizontal street lines
-    for (final y in [0.25, 0.5, 0.75]) {
+    for (final y in [0.16, 0.38, 0.62, 0.84]) {
       canvas.drawLine(
-        Offset(0, size.height * y),
-        Offset(size.width, size.height * y),
-        grid,
-      );
-    }
-    // Vertical street lines
-    for (final x in [0.3, 0.6]) {
-      canvas.drawLine(
-        Offset(size.width * x, 0),
-        Offset(size.width * x, size.height),
-        grid,
+        Offset(size.width * 0.06, size.height * y),
+        Offset(size.width * 0.94, size.height * y),
+        street,
       );
     }
 
-    // Glowing route line
+    for (final x in [0.18, 0.42, 0.67, 0.86]) {
+      canvas.drawLine(
+        Offset(size.width * x, size.height * 0.08),
+        Offset(size.width * x, size.height * 0.92),
+        street,
+      );
+    }
+
+    final routeGlow = Paint()
+      ..color = color.withValues(alpha: 0.25)
+      ..strokeWidth = 18
+      ..strokeCap = ui.StrokeCap.round
+      ..style = ui.PaintingStyle.stroke;
+
     final route = Paint()
       ..color = color
-      ..strokeWidth = 3
-      ..style = ui.PaintingStyle.stroke
-      ..strokeCap = ui.StrokeCap.round;
+      ..strokeWidth = 4
+      ..strokeCap = ui.StrokeCap.round
+      ..style = ui.PaintingStyle.stroke;
 
     final path = ui.Path()
-      ..moveTo(size.width * 0.05, size.height * 0.75)
-      ..lineTo(size.width * 0.3, size.height * 0.75)
-      ..lineTo(size.width * 0.3, size.height * 0.25)
-      ..lineTo(size.width * 0.6, size.height * 0.25)
-      ..lineTo(size.width * 0.6, size.height * 0.5)
-      ..lineTo(size.width * 0.95, size.height * 0.5);
+      ..moveTo(size.width * 0.12, size.height * 0.78)
+      ..lineTo(size.width * 0.28, size.height * 0.78)
+      ..lineTo(size.width * 0.28, size.height * 0.45)
+      ..lineTo(size.width * 0.53, size.height * 0.45)
+      ..lineTo(size.width * 0.53, size.height * 0.24)
+      ..lineTo(size.width * 0.82, size.height * 0.24)
+      ..lineTo(size.width * 0.82, size.height * 0.68);
 
+    canvas.drawPath(path, routeGlow);
     canvas.drawPath(path, route);
-
-    // Start dot
     canvas.drawCircle(
-      Offset(size.width * 0.05, size.height * 0.75),
-      5,
-      Paint()..color = color,
+      Offset(size.width * 0.12, size.height * 0.78),
+      7,
+      Paint()..color = Colors.white,
     );
-    // End dot
     canvas.drawCircle(
-      Offset(size.width * 0.95, size.height * 0.5),
-      5,
+      Offset(size.width * 0.82, size.height * 0.68),
+      9,
       Paint()..color = color,
     );
   }
 
   @override
-  bool shouldRepaint(_CityMapPainter old) => old.color != color;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

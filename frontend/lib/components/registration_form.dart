@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+
 class RegistrationForm extends StatefulWidget {
   const RegistrationForm({
     super.key,
@@ -40,6 +42,7 @@ class _RegistrationFormState extends State<RegistrationForm> {
             controller: widget.nameController,
             decoration: const InputDecoration(
               labelText: 'Нэр',
+              hintText: 'Таны бүтэн нэр',
               prefixIcon: Icon(Icons.person_outline),
             ),
             validator: (value) {
@@ -55,6 +58,7 @@ class _RegistrationFormState extends State<RegistrationForm> {
             keyboardType: TextInputType.emailAddress,
             decoration: const InputDecoration(
               labelText: 'Имэйл',
+              hintText: 'name@example.com',
               prefixIcon: Icon(Icons.email_outlined),
             ),
             validator: (value) {
@@ -70,6 +74,7 @@ class _RegistrationFormState extends State<RegistrationForm> {
             obscureText: !_passwordVisible,
             decoration: InputDecoration(
               labelText: 'Нууц үг',
+              hintText: 'Доод тал нь 6 тэмдэгт',
               prefixIcon: const Icon(Icons.lock_outline),
               suffixIcon: IconButton(
                 icon: Icon(
@@ -91,9 +96,7 @@ class _RegistrationFormState extends State<RegistrationForm> {
           const SizedBox(height: 20),
           FilledButton(
             onPressed: widget.isSubmitting ? null : widget.onSubmit,
-            child: Text(
-              widget.isSubmitting ? 'Бүртгэж байна...' : 'Бүртгэх',
-            ),
+            child: Text(widget.isSubmitting ? 'Бүртгэж байна...' : 'Бүртгэх'),
           ),
           if (widget.message != null) ...[
             const SizedBox(height: 12),
@@ -105,32 +108,24 @@ class _RegistrationFormState extends State<RegistrationForm> {
   }
 
   Widget _buildMessageBanner(String message, bool isSuccess) {
+    final color = isSuccess ? AppColors.success : AppColors.danger;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color:
-              (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.25),
-        ),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
           Icon(
             isSuccess ? Icons.check_circle_outline : Icons.error_outline,
-            color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
+            color: color,
             size: 18,
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
-                fontSize: 13,
-              ),
-            ),
+            child: Text(message, style: TextStyle(color: color, fontSize: 13)),
           ),
         ],
       ),

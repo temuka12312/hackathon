@@ -1,6 +1,9 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+
 import '../theme/app_colors.dart';
 import '../widgets/map_zoom_controls.dart';
 
@@ -14,12 +17,13 @@ class AccessibilityMapPage extends StatefulWidget {
 class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
   static const double _minZoom = 5;
   static const double _maxZoom = 18;
+  static const _center = LatLng(47.9184, 106.9177);
+
+  final MapController _mapController = MapController();
+
   bool _showRamps = true;
   bool _showElevators = true;
   bool _showClosed = true;
-  final MapController _mapController = MapController();
-
-  static const _center = LatLng(47.9184, 106.9177);
 
   static const _ramps = [
     LatLng(47.9200, 106.9180),
@@ -44,181 +48,187 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg1,
+      backgroundColor: AppColors.canvas,
       body: Stack(
         children: [
-          // Map with accessibility circles
           FlutterMap(
             mapController: _mapController,
             options: const MapOptions(initialCenter: _center, initialZoom: 14),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate:
+                    'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.ubcab.app',
               ),
               CircleLayer(
                 circles: [
-                  if (_showRamps)
-                    ..._ramps.map(
-                      (p) => CircleMarker(
-                        point: p,
-                        radius: 40,
-                        color: AppColors.success.withValues(alpha: 0.25),
-                        borderColor: AppColors.success,
-                        borderStrokeWidth: 2,
-                      ),
-                    ),
+                  if (_showRamps) ..._circles(_ramps, AppColors.success, 36),
                   if (_showElevators)
-                    ..._elevators.map(
-                      (p) => CircleMarker(
-                        point: p,
-                        radius: 30,
-                        color: AppColors.routeBlue.withValues(alpha: 0.25),
-                        borderColor: AppColors.routeBlue,
-                        borderStrokeWidth: 2,
-                      ),
-                    ),
+                    ..._circles(_elevators, AppColors.routeBlue, 30),
                   if (_showClosed)
-                    ..._closedRoads.map(
-                      (p) => CircleMarker(
-                        point: p,
-                        radius: 35,
-                        color: AppColors.danger.withValues(alpha: 0.2),
-                        borderColor: AppColors.danger,
-                        borderStrokeWidth: 2,
-                      ),
-                    ),
+                    ..._circles(_closedRoads, AppColors.danger, 34),
                 ],
               ),
             ],
           ),
+          IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.12),
+                    Colors.transparent,
+                    Colors.white.withValues(alpha: 0.52),
+                  ],
+                ),
+              ),
+              child: const SizedBox.expand(),
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: _FrostCard(
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Icon(
+                        Icons.accessible_forward_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Accessibility map',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Рамп, лифт, хаалттай хэсгүүдийг хянах',
+                            style: TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           Positioned(
             right: 16,
-            bottom: 232,
+            bottom: 250,
             child: MapZoomControls(
               onZoomIn: () => _adjustZoom(1),
               onZoomOut: () => _adjustZoom(-1),
             ),
           ),
-
-          // Top accessibility banner
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.success,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: const [
-                        Icon(
-                          Icons.accessible_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Хүртээмжийн горим идэвхтэй',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Bottom legend panel
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              decoration: const BoxDecoration(
-                color: AppColors.bg2,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: AppColors.bg3,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Давхарга',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _legendRow(
-                        AppColors.success,
-                        Icons.accessible_rounded,
-                        'Рамп (налуу гарц)',
-                        _showRamps,
-                        (v) => setState(() => _showRamps = v),
-                      ),
-                      const SizedBox(height: 10),
-                      _legendRow(
-                        AppColors.routeBlue,
-                        Icons.elevator_rounded,
-                        'Лифт',
-                        _showElevators,
-                        (v) => setState(() => _showElevators = v),
-                      ),
-                      const SizedBox(height: 10),
-                      _legendRow(
-                        AppColors.danger,
-                        Icons.block_rounded,
-                        'Хаалттай зам',
-                        _showClosed,
-                        (v) => setState(() => _showClosed = v),
-                      ),
-                    ],
-                  ),
+          DraggableScrollableSheet(
+            initialChildSize: 0.26,
+            minChildSize: 0.2,
+            maxChildSize: 0.46,
+            snap: true,
+            snapSizes: const [0.26, 0.46],
+            builder: (context, controller) {
+              return Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
                 ),
-              ),
-            ),
+                child: ListView(
+                  controller: controller,
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 42,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: AppColors.stroke,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Accessibility layers',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'City movement-д саад болж болох цэгүүдийг хурдан шүүж харуулна.',
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 18),
+                    _legendRow(
+                      AppColors.success,
+                      Icons.accessible_rounded,
+                      'Рамп',
+                      _showRamps,
+                      (v) => setState(() => _showRamps = v),
+                    ),
+                    const SizedBox(height: 12),
+                    _legendRow(
+                      AppColors.routeBlue,
+                      Icons.elevator_rounded,
+                      'Лифт',
+                      _showElevators,
+                      (v) => setState(() => _showElevators = v),
+                    ),
+                    const SizedBox(height: 12),
+                    _legendRow(
+                      AppColors.danger,
+                      Icons.block_rounded,
+                      'Хаалттай зам',
+                      _showClosed,
+                      (v) => setState(() => _showClosed = v),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
     );
+  }
+
+  List<CircleMarker> _circles(List<LatLng> points, Color color, double radius) {
+    return points
+        .map(
+          (point) => CircleMarker(
+            point: point,
+            radius: radius,
+            color: color.withValues(alpha: 0.18),
+            borderColor: color,
+            borderStrokeWidth: 2,
+          ),
+        )
+        .toList();
   }
 
   Widget _legendRow(
@@ -228,31 +238,62 @@ class _AccessibilityMapPageState extends State<AccessibilityMapPage> {
     bool value,
     ValueChanged<bool> onChanged,
   ) {
-    return Row(
-      children: [
-        Container(
-          width: 32,
-          height: 32,
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.lightSurface,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Switch.adaptive(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+class _FrostCard extends StatelessWidget {
+  const _FrostCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(8),
+            color: Colors.white.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
           ),
-          child: Icon(icon, color: color, size: 18),
+          child: child,
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-          ),
-        ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-          activeThumbColor: color,
-          inactiveTrackColor: AppColors.bg3,
-        ),
-      ],
+      ),
     );
   }
 }
