@@ -25,6 +25,21 @@ flutter pub get
 flutter run
 ```
 
+To use real road-network routing from OpenRouteService, pass your API key:
+
+```bash
+cd frontend
+flutter run --dart-define=ORS_API_KEY=your_openrouteservice_key
+```
+
+Optional:
+
+```bash
+flutter run --dart-define=ORS_API_KEY=your_openrouteservice_key --dart-define=ORS_BASE_URL=https://api.openrouteservice.org/v2/directions
+```
+
+Without `ORS_API_KEY`, the app falls back to the current public OSRM router.
+
 The Flutter app uses these backend URLs by default:
 
 - Android emulator: `http://10.0.2.2:3030/api/health`

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -14,17 +16,21 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   static const LatLng _defaultLocation = LatLng(47.9184, 106.9177);
+  static const LatLng _defaultDestination = LatLng(47.9304, 106.9537);
   static const String _defaultRoute = 'Такси';
 
   final MapController _mapController = MapController();
 
   LatLng currentLocation = _defaultLocation;
+  LatLng destination = _defaultDestination;
   String? locationError;
   String selectedRoute = _defaultRoute;
   String selectedSafeMode = 'Явган';
-  List<LatLng> activeRoutePoints = const [];
+  _MapEditTarget selectedEditTarget = _MapEditTarget.destination;
+  List<RoutePath> activeRoutes = const [];
   bool isRouteLoading = false;
   String? routeError;
+  bool hasManualDestination = false;
 
   @override
   void initState() {
@@ -75,6 +81,9 @@ class _HomePageState extends State<HomePage> {
 
       setState(() {
         currentLocation = nextLocation;
+        if (!hasManualDestination) {
+          destination = _defaultDestinationFor(nextLocation);
+        }
         locationError = null;
       });
 
@@ -96,9 +105,11 @@ class _HomePageState extends State<HomePage> {
     final routeOptions = _buildRouteOptions();
     final activeRoute =
         routeOptions[selectedRoute] ?? routeOptions[_defaultRoute]!;
-    final routePoints = activeRoutePoints.isNotEmpty
-        ? activeRoutePoints
-        : activeRoute.fallbackPoints;
+    final routingPolicy = _routingPolicyFor(activeRoute);
+    final displayedRoutes = activeRoutes.isNotEmpty
+        ? activeRoutes
+        : _fallbackRoutesFor(activeRoute, routingPolicy);
+    final hasDisplayedRoutes = displayedRoutes.isNotEmpty;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -109,6 +120,7 @@ class _HomePageState extends State<HomePage> {
             options: MapOptions(
               initialCenter: currentLocation,
               initialZoom: 15,
+              onTap: (_, point) => _updateEditablePoint(point),
             ),
             children: [
               TileLayer(
@@ -117,11 +129,14 @@ class _HomePageState extends State<HomePage> {
               ),
               PolylineLayer(
                 polylines: [
-                  Polyline(
-                    points: routePoints,
-                    strokeWidth: 7,
-                    color: activeRoute.color,
-                  ),
+                  for (final entry in displayedRoutes.asMap().entries)
+                    Polyline(
+                      points: entry.value.points,
+                      strokeWidth: entry.key == 0 ? 8 : 5,
+                      color: entry.key == 0
+                          ? activeRoute.color
+                          : activeRoute.color.withValues(alpha: 0.28),
+                    ),
                 ],
               ),
               MarkerLayer(
@@ -137,7 +152,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   Marker(
-                    point: routePoints.last,
+                    point: destination,
                     width: 68,
                     height: 68,
                     child: Container(
@@ -169,17 +184,71 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: const TextField(
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        hintText: 'Хаашаа явах вэ?',
-                        icon: Icon(Icons.search),
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Газрын зураг дээр товшоод цэгээ зөөнө',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Эхлээд аль цэгийг зөөхөө сонгоод map дээр tap хийнэ үү.',
+                          style: TextStyle(color: Colors.black54),
+                        ),
+                        const SizedBox(height: 14),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('Байгаа газар'),
+                              selected:
+                                  selectedEditTarget == _MapEditTarget.current,
+                              onSelected: (_) {
+                                setState(() {
+                                  selectedEditTarget = _MapEditTarget.current;
+                                });
+                              },
+                            ),
+                            ChoiceChip(
+                              label: const Text('Очих газар'),
+                              selected:
+                                  selectedEditTarget ==
+                                  _MapEditTarget.destination,
+                              onSelected: (_) {
+                                setState(() {
+                                  selectedEditTarget =
+                                      _MapEditTarget.destination;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        _locationSummaryRow(
+                          icon: Icons.my_location_rounded,
+                          color: Colors.red,
+                          label: 'Байгаа газар',
+                          point: currentLocation,
+                        ),
+                        const SizedBox(height: 8),
+                        _locationSummaryRow(
+                          icon: Icons.flag_rounded,
+                          color: activeRoute.color,
+                          label: 'Очих газар',
+                          point: destination,
+                        ),
+                      ],
                     ),
                   ),
                   const Spacer(),
@@ -205,9 +274,30 @@ class _HomePageState extends State<HomePage> {
                         Text(
                           isRouteLoading
                               ? 'Зам тооцоолж байна...'
-                              : routeError ?? activeRoute.description,
+                              : routeError ??
+                                    _routeSummary(activeRoute, displayedRoutes),
                           style: const TextStyle(color: Colors.black54),
                         ),
+                        if (hasDisplayedRoutes) ...[
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: displayedRoutes.asMap().entries.map((
+                              entry,
+                            ) {
+                              final isBest = entry.key == 0;
+                              return _routeStatChip(
+                                label: isBest
+                                    ? _bestRouteLabel(routingPolicy)
+                                    : 'Хувилбар ${entry.key + 1}',
+                                route: entry.value,
+                                color: activeRoute.color,
+                                emphasized: isBest,
+                              );
+                            }).toList(),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -272,82 +362,211 @@ class _HomePageState extends State<HomePage> {
         color: Colors.amber,
         description: 'Таны байршлаас төв замаар шууд очих хурдан чиглэл.',
         profile: 'driving',
-        fallbackPoints: _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0030, 0.0080],
-          [0.0070, 0.0180],
-          [0.0110, 0.0290],
-        ]),
+        primaryFallbackWaypoints: const [
+          _RouteWaypointSpec(0.00, 0.00),
+          _RouteWaypointSpec(0.26, 0.10),
+          _RouteWaypointSpec(0.54, -0.04),
+          _RouteWaypointSpec(0.82, 0.06),
+          _RouteWaypointSpec(1.00, 0.00),
+        ],
+        alternativeFallbackWaypoints: const [
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.18, -0.12),
+            _RouteWaypointSpec(0.44, -0.06),
+            _RouteWaypointSpec(0.72, 0.02),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.24, 0.18),
+            _RouteWaypointSpec(0.58, 0.12),
+            _RouteWaypointSpec(0.86, 0.04),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+        ],
       ),
       'Shared Ride': _RouteOption(
         color: Colors.blue,
         description: 'Замдаа rider авах боломжтой нийлмэл цэгүүдтэй маршрут.',
         profile: 'driving',
-        fallbackPoints: _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0045, 0.0050],
-          [0.0060, 0.0150],
-          [0.0095, 0.0240],
-          [0.0130, 0.0320],
-        ]),
+        primaryFallbackWaypoints: const [
+          _RouteWaypointSpec(0.00, 0.00),
+          _RouteWaypointSpec(0.20, 0.24),
+          _RouteWaypointSpec(0.40, -0.08),
+          _RouteWaypointSpec(0.66, 0.18),
+          _RouteWaypointSpec(0.84, 0.04),
+          _RouteWaypointSpec(1.00, 0.00),
+        ],
+        alternativeFallbackWaypoints: const [
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.22, 0.08),
+            _RouteWaypointSpec(0.38, 0.28),
+            _RouteWaypointSpec(0.64, 0.10),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.18, -0.10),
+            _RouteWaypointSpec(0.46, 0.04),
+            _RouteWaypointSpec(0.74, -0.02),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+        ],
       ),
       'Safe Route': _RouteOption(
         color: Colors.green,
         description: _safeRouteDescription(),
         profile: _safeRouteProfile(),
-        fallbackPoints: _safeRoutePoints(),
+        primaryFallbackWaypoints: _safeRouteWaypoints(),
+        alternativeFallbackWaypoints: _safeRouteAlternativeWaypoints(),
       ),
       'SOS': _RouteOption(
         color: Colors.red,
         description: 'Хамгийн ойр emergency цэг рүү хурдан хүрэх маршрут.',
         profile: 'driving',
-        fallbackPoints: _routePoints(const [
-          [0.0000, 0.0000],
-          [-0.0020, 0.0070],
-          [-0.0035, 0.0140],
-          [-0.0015, 0.0210],
-        ]),
+        primaryFallbackWaypoints: const [
+          _RouteWaypointSpec(0.00, 0.00),
+          _RouteWaypointSpec(0.38, -0.10),
+          _RouteWaypointSpec(0.74, 0.02),
+          _RouteWaypointSpec(1.00, 0.00),
+        ],
+        alternativeFallbackWaypoints: const [
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.24, -0.18),
+            _RouteWaypointSpec(0.52, -0.08),
+            _RouteWaypointSpec(0.80, 0.01),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.30, 0.12),
+            _RouteWaypointSpec(0.58, 0.08),
+            _RouteWaypointSpec(0.88, 0.02),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+        ],
       ),
     };
   }
 
-  List<LatLng> _routePoints(List<List<double>> offsets) {
-    return offsets
-        .map(
-          (offset) => LatLng(
-            currentLocation.latitude + offset[0],
-            currentLocation.longitude + offset[1],
-          ),
-        )
-        .toList();
+  List<LatLng> _routePoints(List<_RouteWaypointSpec> waypoints) {
+    final latitudeDelta = destination.latitude - currentLocation.latitude;
+    final longitudeDelta = destination.longitude - currentLocation.longitude;
+    final length = math.sqrt(
+      (latitudeDelta * latitudeDelta) + (longitudeDelta * longitudeDelta),
+    );
+
+    if (length < 0.00001) {
+      return [currentLocation, destination];
+    }
+
+    final perpendicularLatitude = -longitudeDelta / length;
+    final perpendicularLongitude = latitudeDelta / length;
+    final lateralScale = math.max(length * 0.18, 0.0014);
+
+    return waypoints.map((waypoint) {
+      final baseLatitude =
+          currentLocation.latitude + (latitudeDelta * waypoint.progress);
+      final baseLongitude =
+          currentLocation.longitude + (longitudeDelta * waypoint.progress);
+
+      return LatLng(
+        baseLatitude +
+            (perpendicularLatitude * lateralScale * waypoint.lateral),
+        baseLongitude +
+            (perpendicularLongitude * lateralScale * waypoint.lateral),
+      );
+    }).toList();
   }
 
-  List<LatLng> _safeRoutePoints() {
+  List<_RouteWaypointSpec> _safeRouteWaypoints() {
     switch (selectedSafeMode) {
       case 'Машинтай':
-        return _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0030, 0.0110],
-          [0.0065, 0.0200],
-          [0.0100, 0.0310],
-        ]);
+        return const [
+          _RouteWaypointSpec(0.00, 0.00),
+          _RouteWaypointSpec(0.24, 0.12),
+          _RouteWaypointSpec(0.52, 0.06),
+          _RouteWaypointSpec(0.80, 0.10),
+          _RouteWaypointSpec(1.00, 0.00),
+        ];
       case 'Хөгжлийн бэрхшээлтэй':
-        return _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0015, 0.0080],
-          [0.0035, 0.0150],
-          [0.0060, 0.0220],
-          [0.0080, 0.0290],
-        ]);
+        return const [
+          _RouteWaypointSpec(0.00, 0.00),
+          _RouteWaypointSpec(0.18, 0.05),
+          _RouteWaypointSpec(0.42, 0.02),
+          _RouteWaypointSpec(0.68, 0.08),
+          _RouteWaypointSpec(0.88, 0.03),
+          _RouteWaypointSpec(1.00, 0.00),
+        ];
       case 'Явган':
       default:
-        return _routePoints(const [
-          [0.0000, 0.0000],
-          [0.0020, 0.0100],
-          [0.0050, 0.0200],
-          [0.0080, 0.0260],
-          [0.0120, 0.0360],
-        ]);
+        return const [
+          _RouteWaypointSpec(0.00, 0.00),
+          _RouteWaypointSpec(0.22, 0.16),
+          _RouteWaypointSpec(0.46, 0.04),
+          _RouteWaypointSpec(0.72, 0.10),
+          _RouteWaypointSpec(1.00, 0.00),
+        ];
+    }
+  }
+
+  List<List<_RouteWaypointSpec>> _safeRouteAlternativeWaypoints() {
+    switch (selectedSafeMode) {
+      case 'Машинтай':
+        return const [
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.20, 0.05),
+            _RouteWaypointSpec(0.48, 0.14),
+            _RouteWaypointSpec(0.76, 0.06),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.24, -0.04),
+            _RouteWaypointSpec(0.56, 0.02),
+            _RouteWaypointSpec(0.82, 0.03),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+        ];
+      case 'Хөгжлийн бэрхшээлтэй':
+        return const [
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.16, 0.02),
+            _RouteWaypointSpec(0.40, 0.07),
+            _RouteWaypointSpec(0.72, 0.04),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.20, -0.02),
+            _RouteWaypointSpec(0.44, 0.01),
+            _RouteWaypointSpec(0.76, 0.06),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+        ];
+      case 'Явган':
+      default:
+        return const [
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.20, 0.08),
+            _RouteWaypointSpec(0.46, 0.18),
+            _RouteWaypointSpec(0.78, 0.07),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+          [
+            _RouteWaypointSpec(0.00, 0.00),
+            _RouteWaypointSpec(0.18, -0.03),
+            _RouteWaypointSpec(0.50, 0.03),
+            _RouteWaypointSpec(0.74, 0.09),
+            _RouteWaypointSpec(1.00, 0.00),
+          ],
+        ];
     }
   }
 
@@ -378,20 +597,22 @@ class _HomePageState extends State<HomePage> {
     final routeOptions = _buildRouteOptions();
     final activeRoute =
         routeOptions[selectedRoute] ?? routeOptions[_defaultRoute]!;
+    final routingPolicy = _routingPolicyFor(activeRoute);
+    final fallbackRoutes = _fallbackRoutesFor(activeRoute, routingPolicy);
     final requestKey =
-        '$selectedRoute:$selectedSafeMode:${currentLocation.latitude}:${currentLocation.longitude}';
+        '$selectedRoute:$selectedSafeMode:${currentLocation.latitude}:${currentLocation.longitude}:${destination.latitude}:${destination.longitude}';
 
     setState(() {
       isRouteLoading = true;
       routeError = null;
-      activeRoutePoints = activeRoute.fallbackPoints;
+      activeRoutes = fallbackRoutes;
     });
 
     try {
-      final route = await RoutingService.fetchRoute(
+      final routes = await RoutingService.fetchRoutes(
         start: currentLocation,
-        end: activeRoute.fallbackPoints.last,
-        profile: activeRoute.profile,
+        end: destination,
+        profile: routingPolicy.profile,
       );
 
       if (!mounted) {
@@ -400,13 +621,17 @@ class _HomePageState extends State<HomePage> {
 
       final isSameRequest =
           requestKey ==
-          '$selectedRoute:$selectedSafeMode:${currentLocation.latitude}:${currentLocation.longitude}';
+          '$selectedRoute:$selectedSafeMode:${currentLocation.latitude}:${currentLocation.longitude}:${destination.latitude}:${destination.longitude}';
       if (!isSameRequest) {
         return;
       }
 
       setState(() {
-        activeRoutePoints = route;
+        final normalizedRoutes = _normalizeRoutesForPolicy(
+          routes,
+          routingPolicy,
+        );
+        activeRoutes = _sortRoutesForPolicy(normalizedRoutes, routingPolicy);
         isRouteLoading = false;
       });
 
@@ -417,7 +642,7 @@ class _HomePageState extends State<HomePage> {
       }
 
       setState(() {
-        activeRoutePoints = activeRoute.fallbackPoints;
+        activeRoutes = fallbackRoutes;
         isRouteLoading = false;
         routeError =
             'Жинхэнэ зам ачаалж чадсангүй. Түр fallback route үзүүлж байна.';
@@ -524,12 +749,335 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
-      final points = activeRoutePoints.isNotEmpty
-          ? activeRoutePoints
-          : route.fallbackPoints;
+      final routingPolicy = _routingPolicyFor(route);
+      final displayedRoutes = activeRoutes.isNotEmpty
+          ? activeRoutes
+          : _fallbackRoutesFor(route, routingPolicy);
+      if (displayedRoutes.isEmpty) {
+        _mapController.move(currentLocation, 15);
+        return;
+      }
+      final points = displayedRoutes.first.points;
       final centerPoint = points[points.length ~/ 2];
       _mapController.move(centerPoint, 14.2);
     });
+  }
+
+  void _updateEditablePoint(LatLng point) {
+    setState(() {
+      if (selectedEditTarget == _MapEditTarget.current) {
+        currentLocation = point;
+        locationError = null;
+      } else {
+        destination = point;
+        hasManualDestination = true;
+      }
+    });
+
+    _loadSelectedRoute();
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            selectedEditTarget == _MapEditTarget.current
+                ? 'Байгаа газар шинэчлэгдлээ'
+                : 'Очих газар шинэчлэгдлээ',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  LatLng _defaultDestinationFor(LatLng start) {
+    return LatLng(start.latitude + 0.012, start.longitude + 0.03);
+  }
+
+  _RoutingPolicy _routingPolicyFor(_RouteOption route) {
+    if (selectedRoute != 'Safe Route') {
+      return _RoutingPolicy(
+        profile: route.profile,
+        priority: _RoutePriority.shortest,
+      );
+    }
+
+    switch (selectedSafeMode) {
+      case 'Машинтай':
+        return const _RoutingPolicy(
+          profile: 'driving',
+          priority: _RoutePriority.roadLegal,
+        );
+      case 'Явган':
+        return const _RoutingPolicy(
+          profile: 'foot',
+          priority: _RoutePriority.fastestWalk,
+        );
+      case 'Хөгжлийн бэрхшээлтэй':
+        return const _RoutingPolicy(
+          profile: 'foot',
+          priority: _RoutePriority.accessibleSafe,
+        );
+      default:
+        return _RoutingPolicy(
+          profile: route.profile,
+          priority: _RoutePriority.shortest,
+        );
+    }
+  }
+
+  List<RoutePath> _fallbackRoutesFor(
+    _RouteOption route,
+    _RoutingPolicy routingPolicy,
+  ) {
+    final variants = <List<_RouteWaypointSpec>>[
+      route.primaryFallbackWaypoints,
+      ...route.alternativeFallbackWaypoints,
+    ];
+
+    final fallbackRoutes = variants.map((waypoints) {
+      final points = _routePoints(waypoints);
+      final distanceMeters = _estimateDistanceMeters(points);
+
+      return RoutePath(
+        points: points,
+        distanceMeters: distanceMeters,
+        durationSeconds: _estimateDurationSeconds(
+          distanceMeters,
+          routingPolicy.profile,
+        ),
+      );
+    }).toList();
+    final normalizedFallbackRoutes = _normalizeRoutesForPolicy(
+      fallbackRoutes,
+      routingPolicy,
+    );
+    if (routingPolicy.priority == _RoutePriority.fastestWalk ||
+        routingPolicy.priority == _RoutePriority.accessibleSafe) {
+      return const [];
+    }
+
+    return _sortRoutesForPolicy(normalizedFallbackRoutes, routingPolicy);
+  }
+
+  String _routeSummary(_RouteOption option, List<RoutePath> routes) {
+    if (routes.isEmpty) {
+      return 'Энэ горимд бодит замын маршрут олдсонгүй.';
+    }
+
+    final routingPolicy = _routingPolicyFor(option);
+    final bestRoute = routes.first;
+    final alternativeCount = routes.length - 1;
+    final alternativesText = alternativeCount > 0
+        ? '$alternativeCount өөр боломжит замтай.'
+        : 'Нэмэлт боломжит зам олдсонгүй.';
+
+    return '${_policyDescription(option, routingPolicy)} ${_bestRouteLabel(routingPolicy)} нь ${_formatDistance(bestRoute.distanceMeters)}, ойролцоогоор ${_formatDuration(bestRoute.durationSeconds)}. $alternativesText';
+  }
+
+  Widget _routeStatChip({
+    required String label,
+    required RoutePath route,
+    required Color color,
+    required bool emphasized,
+  }) {
+    final background = emphasized
+        ? color.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.06);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: emphasized ? color.withValues(alpha: 0.6) : Colors.black12,
+        ),
+      ),
+      child: Text(
+        '$label · ${_formatDistance(route.distanceMeters)} · ${_formatDuration(route.durationSeconds)}',
+        style: TextStyle(
+          color: Colors.black87,
+          fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  String _formatDistance(double meters) {
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(1)} км';
+    }
+
+    return '${meters.round()} м';
+  }
+
+  String _formatDuration(double seconds) {
+    final minutes = (seconds / 60).round();
+    if (minutes < 60) {
+      return '$minutes мин';
+    }
+
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    return '$hours ц $remainingMinutes мин';
+  }
+
+  double _estimateDistanceMeters(List<LatLng> points) {
+    const distance = Distance();
+    var total = 0.0;
+
+    for (var index = 1; index < points.length; index++) {
+      total += distance.as(LengthUnit.Meter, points[index - 1], points[index]);
+    }
+
+    return total;
+  }
+
+  double _estimateDurationSeconds(double distanceMeters, String profile) {
+    final metersPerSecond = switch (profile) {
+      'driving' => 11.1,
+      'foot' => 1.4,
+      'bike' => 4.1,
+      _ => 8.3,
+    };
+
+    return distanceMeters / metersPerSecond;
+  }
+
+  List<RoutePath> _normalizeRoutesForPolicy(
+    List<RoutePath> routes,
+    _RoutingPolicy routingPolicy,
+  ) {
+    return routes
+        .map((route) => _normalizeRouteForPolicy(route, routingPolicy))
+        .toList();
+  }
+
+  RoutePath _normalizeRouteForPolicy(
+    RoutePath route,
+    _RoutingPolicy routingPolicy,
+  ) {
+    if (routingPolicy.priority != _RoutePriority.fastestWalk &&
+        routingPolicy.priority != _RoutePriority.accessibleSafe) {
+      return route;
+    }
+
+    final minimumDuration =
+        route.distanceMeters /
+        (routingPolicy.priority == _RoutePriority.accessibleSafe ? 1.15 : 1.4);
+    final normalizedDuration = math.max(route.durationSeconds, minimumDuration);
+
+    return RoutePath(
+      points: route.points,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: normalizedDuration,
+    );
+  }
+
+  List<RoutePath> _sortRoutesForPolicy(
+    List<RoutePath> routes,
+    _RoutingPolicy routingPolicy,
+  ) {
+    final sortedRoutes = List<RoutePath>.from(routes);
+    sortedRoutes.sort(
+      (a, b) => _routeScore(
+        a,
+        routingPolicy,
+      ).compareTo(_routeScore(b, routingPolicy)),
+    );
+    return sortedRoutes;
+  }
+
+  double _routeScore(RoutePath route, _RoutingPolicy routingPolicy) {
+    final turnPenalty = _turnPenalty(route.points);
+
+    return switch (routingPolicy.priority) {
+      _RoutePriority.shortest => route.distanceMeters,
+      _RoutePriority.roadLegal =>
+        (route.durationSeconds * 0.65) + (route.distanceMeters * 0.35),
+      _RoutePriority.fastestWalk => route.durationSeconds,
+      _RoutePriority.accessibleSafe =>
+        (route.distanceMeters * 0.5) +
+            (route.durationSeconds * 0.25) +
+            (turnPenalty * 220),
+    };
+  }
+
+  double _turnPenalty(List<LatLng> points) {
+    if (points.length < 3) {
+      return 0;
+    }
+
+    var totalPenalty = 0.0;
+
+    for (var index = 1; index < points.length - 1; index++) {
+      final previous = points[index - 1];
+      final current = points[index];
+      final next = points[index + 1];
+
+      final angleA = math.atan2(
+        current.latitude - previous.latitude,
+        current.longitude - previous.longitude,
+      );
+      final angleB = math.atan2(
+        next.latitude - current.latitude,
+        next.longitude - current.longitude,
+      );
+
+      var delta = (angleB - angleA).abs();
+      if (delta > math.pi) {
+        delta = (2 * math.pi) - delta;
+      }
+
+      totalPenalty += delta;
+    }
+
+    return totalPenalty;
+  }
+
+  String _bestRouteLabel(_RoutingPolicy routingPolicy) {
+    return switch (routingPolicy.priority) {
+      _RoutePriority.shortest => 'Хамгийн товч',
+      _RoutePriority.roadLegal => 'Дүрмийн дагуух авто зам',
+      _RoutePriority.fastestWalk => 'Хамгийн хурдан явган зам',
+      _RoutePriority.accessibleSafe => 'Хамгийн safe, товч зам',
+    };
+  }
+
+  String _policyDescription(_RouteOption option, _RoutingPolicy routingPolicy) {
+    return switch (routingPolicy.priority) {
+      _RoutePriority.shortest => option.description,
+      _RoutePriority.roadLegal =>
+        'Машинтай хэрэглэгчид зориулж авто зам, уулзварын дүрэм дагасан чиглэл сонголоо.',
+      _RoutePriority.fastestWalk =>
+        'Явган хэрэглэгчид зориулж дундын явган хэсэг, гэр хорооллын shortcut боломжийг ашигласан хамгийн хурдан чиглэлийг сонголоо.',
+      _RoutePriority.accessibleSafe =>
+        'Хөгжлийн бэрхшээлтэй хэрэглэгчид зориулж илүү аюулгүй, бага эргэлттэй, товч чиглэлийг түрүүлж эрэмбэллээ.',
+    };
+  }
+
+  Widget _locationSummaryRow({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required LatLng point,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            '$label: ${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}',
+            style: const TextStyle(
+              color: Colors.black87,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget actionButton(
@@ -589,11 +1137,31 @@ class _RouteOption {
     required this.color,
     required this.description,
     required this.profile,
-    required this.fallbackPoints,
+    required this.primaryFallbackWaypoints,
+    this.alternativeFallbackWaypoints = const [],
   });
 
   final Color color;
   final String description;
   final String profile;
-  final List<LatLng> fallbackPoints;
+  final List<_RouteWaypointSpec> primaryFallbackWaypoints;
+  final List<List<_RouteWaypointSpec>> alternativeFallbackWaypoints;
+}
+
+class _RoutingPolicy {
+  const _RoutingPolicy({required this.profile, required this.priority});
+
+  final String profile;
+  final _RoutePriority priority;
+}
+
+enum _RoutePriority { shortest, roadLegal, fastestWalk, accessibleSafe }
+
+enum _MapEditTarget { current, destination }
+
+class _RouteWaypointSpec {
+  const _RouteWaypointSpec(this.progress, this.lateral);
+
+  final double progress;
+  final double lateral;
 }

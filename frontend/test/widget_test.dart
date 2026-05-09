@@ -1,12 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:frontend/app.dart';
-import 'package:frontend/pages/home_page.dart';
+import 'package:frontend/pages/auth_page.dart';
 
 void main() {
-  testWidgets('renders home page', (WidgetTester tester) async {
+  testWidgets('renders auth page', (WidgetTester tester) async {
     await tester.pumpWidget(const App());
 
-    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byType(AuthPage), findsOneWidget);
+    expect(find.text('UB SmartRide'), findsOneWidget);
   });
 }
