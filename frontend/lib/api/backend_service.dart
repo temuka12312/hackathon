@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
 
 import '../models/login_response.dart';
 import '../models/auth_response.dart';
@@ -88,6 +89,33 @@ class BackendService {
     }
 
     return LoginResponse.fromJson(json);
+  }
+
+  static Future<void> saveRoute({
+    required List<LatLng> points,
+    required String mode,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/routes');
+    await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'transportMode': mode,
+        'polyline': points.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
+        'startTime': startTime.toIso8601String(),
+        'endTime': endTime.toIso8601String(),
+      }),
+    );
+  }
+
+  static Future<List<Map<String, dynamic>>> getRoutes() async {
+    final uri = Uri.parse('$baseUrl/api/routes');
+    final response = await http.get(uri);
+    if (response.statusCode != 200) return [];
+    final list = jsonDecode(response.body) as List<dynamic>;
+    return list.cast<Map<String, dynamic>>();
   }
 
   static String get _portLabel => Uri.parse(baseUrl).port.toString();

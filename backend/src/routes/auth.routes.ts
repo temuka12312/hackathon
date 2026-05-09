@@ -1,10 +1,7 @@
 import express, { Request, Response } from "express";
-<<<<<<< HEAD
 import { AuthUser } from "../models/AuthUser";
 import { hashPassword, verifyPassword } from "../utils/password";
-=======
 import { loginUser, registerUser } from "../services/auth.service";
->>>>>>> ff4d34b5abbaf7de8c00a97eebfc5677583bfcaa
 
 const router = express.Router();
 
@@ -24,7 +21,6 @@ router.post("/register", async (req: Request, res: Response) => {
 
 router.post("/login", async (req: Request, res: Response) => {
   try {
-<<<<<<< HEAD
     const email = String(req.body.email ?? "").trim().toLowerCase();
     const password = String(req.body.password ?? "");
 
@@ -50,11 +46,9 @@ router.post("/login", async (req: Request, res: Response) => {
         email: user.email,
       },
     });
-=======
     const result = await loginUser(req.body);
 
     return res.status(result.status).json(result.body);
->>>>>>> ff4d34b5abbaf7de8c00a97eebfc5677583bfcaa
   } catch (error) {
     console.error(error);
 
