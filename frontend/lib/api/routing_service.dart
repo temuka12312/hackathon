@@ -102,6 +102,8 @@ class RoutingService {
     final osrmProfile = switch (profile) {
       'driving-car' => 'driving',
       'driving-shortest' => 'driving',
+      'taxi-fast' => 'driving',
+      'heavy-vehicle' => 'driving',
       'foot-walking' => 'foot',
       'wheelchair' => 'foot',
       _ => profile,
@@ -146,6 +148,8 @@ class RoutingService {
   }) async {
     final orsProfile = switch (profile) {
       'driving-shortest' => 'driving-car',
+      'taxi-fast' => 'driving-car',
+      'heavy-vehicle' => 'driving-hgv',
       _ => profile,
     };
     final uri = Uri.parse('$_orsBaseUrl/$orsProfile/geojson');
@@ -357,6 +361,11 @@ class RoutingService {
           'avoid_features': ['ferries'],
         };
       case 'driving-car':
+      case 'taxi-fast':
+        return {
+          'avoid_features': ['ferries'],
+        };
+      case 'heavy-vehicle':
         return {
           'avoid_features': ['ferries'],
         };
@@ -373,6 +382,8 @@ class RoutingService {
     switch (profile) {
       case 'driving-shortest':
         return 'shortest';
+      case 'taxi-fast':
+        return 'fastest';
       default:
         return 'recommended';
     }
@@ -384,6 +395,8 @@ class RoutingService {
         routes.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
         return;
       case 'driving-car':
+      case 'taxi-fast':
+      case 'heavy-vehicle':
       case 'foot-walking':
       case 'wheelchair':
       default:

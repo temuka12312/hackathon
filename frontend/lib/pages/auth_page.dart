@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api/backend_service.dart';
 import '../components/auth_status_banner.dart';
 import '../components/auth_text_field.dart';
+import '../models/app_user.dart';
 import '../models/login_response.dart';
 import '../theme/app_colors.dart';
 import '../widgets/main_scaffold.dart';
@@ -21,12 +22,15 @@ class _AuthPageState extends State<AuthPage> {
 
   final GlobalKey<FormState> _registerFormKey = GlobalKey<FormState>();
   final TextEditingController _registerNameController = TextEditingController();
-  final TextEditingController _registerEmailController = TextEditingController();
-  final TextEditingController _registerPasswordController = TextEditingController();
+  final TextEditingController _registerEmailController =
+      TextEditingController();
+  final TextEditingController _registerPasswordController =
+      TextEditingController();
 
   final GlobalKey<FormState> _loginFormKey = GlobalKey<FormState>();
   final TextEditingController _loginEmailController = TextEditingController();
-  final TextEditingController _loginPasswordController = TextEditingController();
+  final TextEditingController _loginPasswordController =
+      TextEditingController();
 
   bool _loginPasswordVisible = false;
   bool _registerPasswordVisible = false;
@@ -100,12 +104,21 @@ class _AuthPageState extends State<AuthPage> {
     });
 
     try {
-      final LoginResponse _ = await BackendService.loginUser(email: _loginEmailController.text.trim(), password: _loginPasswordController.text);
+      final LoginResponse response = await BackendService.loginUser(
+        email: _loginEmailController.text.trim(),
+        password: _loginPasswordController.text,
+      );
       if (!mounted) {
         return;
       }
 
-      Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => const MainScaffold()));
+      final currentUser = AppUser(name: response.name, email: response.email);
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => MainScaffold(currentUser: currentUser),
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -158,12 +171,17 @@ class _AuthPageState extends State<AuthPage> {
                                 return FadeTransition(
                                   opacity: animation,
                                   child: SlideTransition(
-                                    position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
+                                    position: Tween<Offset>(
+                                      begin: const Offset(0.05, 0),
+                                      end: Offset.zero,
+                                    ).animate(animation),
                                     child: child,
                                   ),
                                 );
                               },
-                              child: _showLogin ? _buildLoginForm(theme) : _buildRegisterForm(theme),
+                              child: _showLogin
+                                  ? _buildLoginForm(theme)
+                                  : _buildRegisterForm(theme),
                             ),
                           ],
                         ),
@@ -193,17 +211,26 @@ class _AuthPageState extends State<AuthPage> {
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
-            child: const Icon(Icons.directions_car_filled_rounded, color: Colors.white, size: 28),
+            child: const Icon(
+              Icons.directions_car_filled_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
           ),
           const SizedBox(height: 12),
           Text(
             'Move through Ulaanbaatar with a cleaner, faster booking flow.',
-            style: theme.textTheme.headlineMedium?.copyWith(color: Colors.white, height: 1.02),
+            style: theme.textTheme.headlineMedium?.copyWith(
+              color: Colors.white,
+              height: 1.02,
+            ),
           ),
           const SizedBox(height: 14),
           Text(
             'Book rides, monitor safer routes, and keep the map experience focused on motion instead of clutter.',
-            style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white.withValues(alpha: 0.68)),
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: Colors.white.withValues(alpha: 0.68),
+            ),
           ),
         ],
       ),
@@ -214,7 +241,10 @@ class _AuthPageState extends State<AuthPage> {
     return Container(
       height: 56,
       padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(color: AppColors.lightSurface, borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.lightSurface,
+        borderRadius: BorderRadius.circular(24),
+      ),
       child: Row(
         children: [
           _toggleItem(label: 'Нэвтрэх', isLogin: true),
@@ -233,11 +263,18 @@ class _AuthPageState extends State<AuthPage> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(color: active ? AppColors.primary : Colors.transparent, borderRadius: BorderRadius.circular(20)),
+          decoration: BoxDecoration(
+            color: active ? AppColors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Center(
             child: Text(
               label,
-              style: TextStyle(color: active ? Colors.white : AppColors.textSecondary, fontWeight: FontWeight.w700, fontSize: 14),
+              style: TextStyle(
+                color: active ? Colors.white : AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
             ),
           ),
         ),
@@ -254,7 +291,10 @@ class _AuthPageState extends State<AuthPage> {
         children: [
           Text('Тавтай морил', style: theme.textTheme.headlineSmall),
           const SizedBox(height: 8),
-          Text('Sign in to manage rides, alerts, and destination history in one place.', style: theme.textTheme.bodyLarge),
+          Text(
+            'Sign in to manage rides, alerts, and destination history in one place.',
+            style: theme.textTheme.bodyLarge,
+          ),
           const SizedBox(height: 22),
           AuthTextField(
             controller: _loginEmailController,
@@ -288,19 +328,34 @@ class _AuthPageState extends State<AuthPage> {
               fillColor: AppColors.lightSurface,
               suffixIcon: IconButton(
                 onPressed: () {
-                  setState(() => _loginPasswordVisible = !_loginPasswordVisible);
+                  setState(
+                    () => _loginPasswordVisible = !_loginPasswordVisible,
+                  );
                 },
-                icon: Icon(_loginPasswordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                icon: Icon(
+                  _loginPasswordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 18),
-          if (_loginMessage != null) ...[AuthStatusBanner(message: _loginMessage!, isSuccess: false), const SizedBox(height: 18)],
-          FilledButton(onPressed: _isLoginSubmitting ? null : _submitLogin, child: Text(_isLoginSubmitting ? 'Нэвтэрч байна...' : 'Нэвтрэх')),
+          if (_loginMessage != null) ...[
+            AuthStatusBanner(message: _loginMessage!, isSuccess: false),
+            const SizedBox(height: 18),
+          ],
+          FilledButton(
+            onPressed: _isLoginSubmitting ? null : _submitLogin,
+            child: Text(_isLoginSubmitting ? 'Нэвтэрч байна...' : 'Нэвтрэх'),
+          ),
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.center,
-            child: Text('Fast access for trips, reports, and account activity.', style: theme.textTheme.bodyMedium),
+            child: Text(
+              'Fast access for trips, reports, and account activity.',
+              style: theme.textTheme.bodyMedium,
+            ),
           ),
         ],
       ),
@@ -316,7 +371,10 @@ class _AuthPageState extends State<AuthPage> {
         children: [
           Text('Шинэ бүртгэл', style: theme.textTheme.headlineSmall),
           const SizedBox(height: 8),
-          Text('Create one account to book rides, report road issues, and keep your saved destinations synced.', style: theme.textTheme.bodyLarge),
+          Text(
+            'Create one account to book rides, report road issues, and keep your saved destinations synced.',
+            style: theme.textTheme.bodyLarge,
+          ),
           const SizedBox(height: 22),
           AuthTextField(
             controller: _registerNameController,
@@ -362,17 +420,31 @@ class _AuthPageState extends State<AuthPage> {
               fillColor: AppColors.lightSurface,
               suffixIcon: IconButton(
                 onPressed: () {
-                  setState(() => _registerPasswordVisible = !_registerPasswordVisible);
+                  setState(
+                    () => _registerPasswordVisible = !_registerPasswordVisible,
+                  );
                 },
-                icon: Icon(_registerPasswordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                icon: Icon(
+                  _registerPasswordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 18),
-          if (_registerMessage != null) ...[AuthStatusBanner(message: _registerMessage!, isSuccess: _registerSucceeded), const SizedBox(height: 18)],
+          if (_registerMessage != null) ...[
+            AuthStatusBanner(
+              message: _registerMessage!,
+              isSuccess: _registerSucceeded,
+            ),
+            const SizedBox(height: 18),
+          ],
           FilledButton(
             onPressed: _isRegisterSubmitting ? null : _submitRegistration,
-            child: Text(_isRegisterSubmitting ? 'Бүртгэж байна...' : 'Бүртгэл үүсгэх'),
+            child: Text(
+              _isRegisterSubmitting ? 'Бүртгэж байна...' : 'Бүртгэл үүсгэх',
+            ),
           ),
         ],
       ),
@@ -398,7 +470,13 @@ class _GlassPanel extends StatelessWidget {
             color: Colors.white.withValues(alpha: 0.94),
             borderRadius: BorderRadius.circular(34),
             border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 34, offset: const Offset(0, 18))],
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 34,
+                offset: const Offset(0, 18),
+              ),
+            ],
           ),
           child: child,
         ),
