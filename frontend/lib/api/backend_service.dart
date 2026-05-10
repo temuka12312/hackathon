@@ -129,9 +129,19 @@ class BackendService {
         'lng': points[index].longitude,
       };
       if (elevations != null && index < elevations.length) {
-        point['ele'] = elevations[index];
+        final ele = elevations[index];
+        if (ele.isFinite) {
+          point['ele'] = ele;
+        }
       }
       return point;
+    });
+
+    final body = jsonEncode({
+      'transportMode': mode,
+      'polyline': polyline,
+      'startTime': startTime.toIso8601String(),
+      'endTime': endTime.toIso8601String(),
     });
 
     http.Response response;
@@ -139,12 +149,7 @@ class BackendService {
       response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'transportMode': mode,
-          'polyline': polyline,
-          'startTime': startTime.toIso8601String(),
-          'endTime': endTime.toIso8601String(),
-        }),
+        body: body,
       );
     } catch (_) {
       throw Exception('Маршрут хадгалах үед backend-тай холбогдож чадсангүй.');

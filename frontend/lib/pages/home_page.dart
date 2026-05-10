@@ -132,6 +132,13 @@ class _HomePageState extends State<HomePage> {
     _syncControllerState();
   }
 
+  String _backendMode(String profile) => switch (profile) {
+    'foot-walking' => 'walk',
+    'wheelchair' => 'wheelchair',
+    'heavy-vehicle' => 'heavy',
+    _ => 'car',
+  };
+
   void _syncControllerState() {
     widget.controller?.updateState(
       journeyStarted: _journeyStarted,
@@ -372,7 +379,7 @@ class _HomePageState extends State<HomePage> {
       await BackendService.saveRoute(
         points: points,
         elevations: elevations,
-        mode: _selectedTransportMode,
+        mode: _backendMode(_selectedTransportMode),
         startTime: startedAt,
         endTime: DateTime.now(),
       );

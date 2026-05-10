@@ -1,11 +1,14 @@
-import { ITraveledRoute, TraveledRoute } from "../models/TraveledRoute";
-
-type SaveRouteInput = Pick<
-  ITraveledRoute,
-  "transportMode" | "polyline" | "startTime" | "endTime"
->;
+import polyline from "@mapbox/polyline";
+import { TraveledRoute } from "../models/TraveledRoute";
 
 type Point = { lat: number; lng: number; ele?: number };
+
+type SaveRouteInput = {
+  transportMode: "car" | "walk" | "heavy" | "wheelchair";
+  polyline: Point[];
+  startTime: Date | string;
+  endTime: Date | string;
+};
 
 function haversineM(a: Point, b: Point): number {
   const R = 6_371_000;
@@ -51,22 +54,47 @@ function rdp(pts: Point[], eps: number): Point[] {
 
 function cleanRoute(pts: Point[]): Point[] {
   if (pts.length < 2) return pts;
-  // Remove GPS jumps > 300 m between consecutive points
   const filtered: Point[] = [pts[0]];
   for (let i = 1; i < pts.length; i++) {
     if (haversineM(filtered[filtered.length - 1], pts[i]) <= 300) {
       filtered.push(pts[i]);
     }
   }
-  // Ramer-Douglas-Peucker at 8 m tolerance
   return rdp(filtered, 8);
 }
 
 export const saveRoute = async (payload: SaveRouteInput) => {
-  const cleaned = cleanRoute(payload.polyline as Point[]);
-  return TraveledRoute.create({ ...payload, polyline: cleaned });
+  const cleaned = cleanRoute(payload.polyline);
+  const encodedPolyline = polyline.encode(
+    cleaned.map((p) => [p.lat, p.lng] as [number, number]),
+  );
+  const elevations = cleaned.map((p) => p.ele ?? 0);
+  return TraveledRoute.create({
+    transportMode: payload.transportMode,
+    encodedPolyline,
+    elevations,
+    startTime: payload.startTime,
+    endTime: payload.endTime,
+  });
 };
 
 export const getRoutes = async () => {
-  return TraveledRoute.find().sort({ createdAt: -1 });
+  const docs = await TraveledRoute.find().sort({ createdAt: -1 });
+  return docs
+    .filter((doc) => doc.encodedPolyline)
+    .map((doc) => {
+      const latLngs = polyline.decode(doc.encodedPolyline);
+      return {
+        _id: doc._id,
+        transportMode: doc.transportMode,
+        polyline: latLngs.map(([lat, lng], i) => ({
+          lat,
+          lng,
+          ...(doc.elevations[i] !== undefined ? { ele: doc.elevations[i] } : {}),
+        })),
+        startTime: doc.startTime,
+        endTime: doc.endTime,
+        createdAt: doc.createdAt,
+      };
+    });
 };
