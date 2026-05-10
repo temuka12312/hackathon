@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../models/app_user.dart';
 import '../theme/app_colors.dart';
 import 'authority_dashboard_page.dart';
 
 class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+  const ProfilePage({super.key, this.currentUser});
+
+  final AppUser? currentUser;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -22,6 +25,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = widget.currentUser;
+    final displayName = currentUser?.name.trim().isNotEmpty == true
+        ? currentUser!.name
+        : 'Хэрэглэгч';
+    final displayEmail = currentUser?.email.trim().isNotEmpty == true
+        ? currentUser!.email
+        : 'Имэйл бүртгэгдээгүй';
+    final avatarLabel = currentUser?.initials ?? 'U';
+
     return Scaffold(
       backgroundColor: AppColors.canvas,
       body: SafeArea(
@@ -57,15 +69,21 @@ class _ProfilePageState extends State<ProfilePage> {
                         shape: BoxShape.circle,
                         border: Border.all(color: AppColors.stroke),
                       ),
-                      child: const Icon(
-                        Icons.person_rounded,
-                        size: 44,
-                        color: AppColors.textPrimary,
+                      child: Center(
+                        child: Text(
+                          avatarLabel,
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
-                      'Б. Отгонбаяр',
+                    Text(
+                      displayName,
                       style: TextStyle(
                         color: AppColors.textPrimary,
                         fontSize: 22,
@@ -73,9 +91,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      'otgonbayar@email.com',
-                      style: TextStyle(color: AppColors.textSecondary),
+                    Text(
+                      displayEmail,
+                      style: const TextStyle(color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 18),
                     Row(

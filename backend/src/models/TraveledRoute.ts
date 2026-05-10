@@ -2,7 +2,8 @@ import mongoose, { Schema, Document, model } from "mongoose";
 
 export interface ITraveledRoute extends Document {
   transportMode: "car" | "walk" | "heavy" | "wheelchair";
-  polyline: { lat: number; lng: number; ele?: number }[];
+  encodedPolyline: string;
+  elevations: number[];
   startTime: Date;
   endTime: Date;
   createdAt: Date;
@@ -16,13 +17,8 @@ const schema = new Schema<ITraveledRoute>(
       enum: ["car", "walk", "heavy", "wheelchair"],
       required: true,
     },
-    polyline: [
-      {
-        lat: { type: Number, required: true },
-        lng: { type: Number, required: true },
-        ele: { type: Number },
-      },
-    ],
+    encodedPolyline: { type: String, required: true },
+    elevations: [{ type: Number }],
     startTime: { type: Date, required: true },
     endTime: { type: Date, required: true },
   },

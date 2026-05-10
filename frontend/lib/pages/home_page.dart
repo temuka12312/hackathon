@@ -8,12 +8,57 @@ import 'package:latlong2/latlong.dart';
 
 import '../api/backend_service.dart';
 import '../api/routing_service.dart';
-import '../models/report_item.dart';
+import '../pages/journey_setup_page.dart';
 import '../theme/app_colors.dart';
 import '../widgets/map_zoom_controls.dart';
 
+class HomePageController extends ChangeNotifier {
+  VoidCallback? _startJourney;
+  VoidCallback? _finishJourney;
+  bool _journeyStarted = false;
+  bool _busy = false;
+
+  bool get journeyStarted => _journeyStarted;
+  bool get busy => _busy;
+
+  void bind({
+    required VoidCallback onStartJourney,
+    required VoidCallback onFinishJourney,
+  }) {
+    _startJourney = onStartJourney;
+    _finishJourney = onFinishJourney;
+  }
+
+  void unbind() {
+    _startJourney = null;
+    _finishJourney = null;
+  }
+
+  void updateState({required bool journeyStarted, required bool busy}) {
+    if (_journeyStarted == journeyStarted && _busy == busy) {
+      return;
+    }
+    _journeyStarted = journeyStarted;
+    _busy = busy;
+    notifyListeners();
+  }
+
+  void handlePrimaryAction() {
+    if (_busy) {
+      return;
+    }
+    if (_journeyStarted) {
+      _finishJourney?.call();
+    } else {
+      _startJourney?.call();
+    }
+  }
+}
+
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.controller});
+
+  final HomePageController? controller;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -32,7 +77,6 @@ class _HomePageState extends State<HomePage> {
   late LatLng _destinationLocation = _offsetDestination(_defaultLocation);
   late LatLng _mapCenter = _destinationLocation;
 
-  String? _locationError;
   List<LatLng> _activeRoutePoints = const [];
   List<LatLng> _recordedPoints = const [];
   List<double> _recordedElevations = const [];
@@ -40,28 +84,66 @@ class _HomePageState extends State<HomePage> {
   bool _isInitializingLocation = true;
   bool _hasCustomDestination = false;
   bool _journeyStarted = false;
-  bool _isTracking = false;
   bool _isSavingTrack = false;
-  bool _showTrafficOverlay = true;
-  bool _isTrafficLoading = false;
   bool _isRouteLoading = false;
   DateTime? _trackStartedAt;
   StreamSubscription<Position>? _locationSubscription;
-  List<_TrafficHotspot> _trafficHotspots = const [];
   List<Polyline> _savedTrackPolylines = const [];
+  String _selectedTransportMode = 'driving-shortest';
 
   @override
   void initState() {
     super.initState();
+    widget.controller?.bind(
+      onStartJourney: () {
+        _openJourneySetupSheet();
+      },
+      onFinishJourney: () {
+        _finishJourney();
+      },
+    );
     _initializeLocation();
-    _loadTrafficApproximation();
     _loadSavedTracks();
+    _syncControllerState();
   }
 
   @override
   void dispose() {
+    widget.controller?.unbind();
     _locationSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) {
+      return;
+    }
+    oldWidget.controller?.unbind();
+    widget.controller?.bind(
+      onStartJourney: () {
+        _openJourneySetupSheet();
+      },
+      onFinishJourney: () {
+        _finishJourney();
+      },
+    );
+    _syncControllerState();
+  }
+
+  String _backendMode(String profile) => switch (profile) {
+    'foot-walking' => 'walk',
+    'wheelchair' => 'wheelchair',
+    'heavy-vehicle' => 'heavy',
+    _ => 'car',
+  };
+
+  void _syncControllerState() {
+    widget.controller?.updateState(
+      journeyStarted: _journeyStarted,
+      busy: _isRouteLoading || _isSavingTrack,
+    );
   }
 
   Future<void> _initializeLocation() async {
@@ -85,7 +167,6 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() {
         _isUsingLiveLocation = false;
-        _locationError = 'Location service унтраалттай байна.';
       });
       return;
     }
@@ -101,7 +182,6 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() {
         _isUsingLiveLocation = false;
-        _locationError = 'Location permission зөвшөөрөөгүй байна.';
       });
       return;
     }
@@ -112,8 +192,6 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() {
         _isUsingLiveLocation = false;
-        _locationError =
-            'Location permission бүрмөсөн хаалттай байна. Settings-ээс зөвшөөрнө үү.';
       });
       return;
     }
@@ -137,7 +215,6 @@ class _HomePageState extends State<HomePage> {
         _destinationLocation = nextDestination;
         _mapCenter = nextCenter;
         _isUsingLiveLocation = true;
-        _locationError = null;
       });
 
       if (recenterMap) {
@@ -149,33 +226,6 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() {
         _isUsingLiveLocation = false;
-        _locationError = 'Таны байршлыг авч чадсангүй.';
-      });
-    }
-  }
-
-  Future<void> _loadTrafficApproximation() async {
-    setState(() {
-      _isTrafficLoading = true;
-    });
-
-    try {
-      final reports = await BackendService.fetchReports();
-      if (!mounted) {
-        return;
-      }
-      final hotspots = _buildTrafficHotspots(reports);
-      setState(() {
-        _trafficHotspots = hotspots.isNotEmpty ? hotspots : _fallbackHotspots();
-        _isTrafficLoading = false;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _trafficHotspots = _fallbackHotspots();
-        _isTrafficLoading = false;
       });
     }
   }
@@ -262,24 +312,10 @@ class _HomePageState extends State<HomePage> {
       _recordedElevations = const [0];
       _trackStartedAt = DateTime.now();
     });
+    _syncControllerState();
 
     await _loadSelectedRoute();
     await _startLiveTracking();
-  }
-
-  void _cancelJourney() {
-    _locationSubscription?.cancel();
-    _locationSubscription = null;
-    setState(() {
-      _journeyStarted = false;
-      _isTracking = false;
-      _isSavingTrack = false;
-      _isRouteLoading = false;
-      _activeRoutePoints = const [];
-      _recordedPoints = const [];
-      _recordedElevations = const [];
-      _trackStartedAt = null;
-    });
   }
 
   Future<void> _startLiveTracking() async {
@@ -303,8 +339,6 @@ class _HomePageState extends State<HomePage> {
           setState(() {
             _currentLocation = nextPoint;
             _isUsingLiveLocation = true;
-            _isTracking = true;
-            _locationError = null;
             if (shouldAppend) {
               _recordedPoints = [..._recordedPoints, nextPoint];
               _recordedElevations = [..._recordedElevations, position.altitude];
@@ -327,24 +361,25 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() {
         _journeyStarted = false;
-        _isTracking = false;
         _activeRoutePoints = const [];
         _recordedPoints = const [];
         _recordedElevations = const [];
         _trackStartedAt = null;
       });
+      _syncControllerState();
       return;
     }
 
     setState(() {
       _isSavingTrack = true;
     });
+    _syncControllerState();
 
     try {
       await BackendService.saveRoute(
         points: points,
         elevations: elevations,
-        mode: 'driving-shortest',
+        mode: _backendMode(_selectedTransportMode),
         startTime: startedAt,
         endTime: DateTime.now(),
       );
@@ -369,15 +404,43 @@ class _HomePageState extends State<HomePage> {
       if (mounted) {
         setState(() {
           _journeyStarted = false;
-          _isTracking = false;
           _isSavingTrack = false;
           _activeRoutePoints = const [];
           _recordedPoints = const [];
           _recordedElevations = const [];
           _trackStartedAt = null;
         });
+        _syncControllerState();
       }
     }
+  }
+
+  Future<void> _openJourneySetupSheet() async {
+    if (_journeyStarted || !mounted) {
+      return;
+    }
+
+    final directDistanceKm =
+        const Distance().distance(_currentLocation, _destinationLocation) /
+        1000;
+    final selectedProfile = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => JourneySetupPage(
+          initialProfile: _selectedTransportMode,
+          directDistanceKm: directDistanceKm,
+        ),
+      ),
+    );
+
+    if (!mounted || selectedProfile == null) {
+      return;
+    }
+
+    setState(() {
+      _selectedTransportMode = selectedProfile;
+    });
+
+    await _startJourney();
   }
 
   Future<void> _loadSelectedRoute() async {
@@ -391,6 +454,7 @@ class _HomePageState extends State<HomePage> {
         _isRouteLoading = false;
         _activeRoutePoints = const [];
       });
+      _syncControllerState();
       return;
     }
 
@@ -412,6 +476,7 @@ class _HomePageState extends State<HomePage> {
         _activeRoutePoints = routes.first.points;
         _isRouteLoading = false;
       });
+      _syncControllerState();
     } catch (_) {
       if (!mounted) {
         return;
@@ -419,16 +484,12 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _isRouteLoading = false;
       });
+      _syncControllerState();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final route = _buildRouteOption();
-    final directDistanceKm =
-        const Distance().distance(_currentLocation, _destinationLocation) /
-        1000;
-
     return Scaffold(
       backgroundColor: AppColors.canvas,
       body: Stack(
@@ -446,8 +507,6 @@ class _HomePageState extends State<HomePage> {
                     'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.frontend',
               ),
-              if (_showTrafficOverlay)
-                CircleLayer(circles: _buildTrafficCircles()),
               if (_savedTrackPolylines.isNotEmpty)
                 PolylineLayer(polylines: _savedTrackPolylines),
               if (_journeyStarted && _activeRoutePoints.isNotEmpty)
@@ -519,37 +578,9 @@ class _HomePageState extends State<HomePage> {
               child: Column(children: [_buildTopChrome(), const Spacer()]),
             ),
           ),
-          if (_journeyStarted && _isTracking)
-            Positioned(
-              top: 124,
-              right: 16,
-              child: SafeArea(
-                child: _GlassChrome(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _LiveDot(),
-                      SizedBox(width: 8),
-                      Text(
-                        'Live track бичиж байна',
-                        style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
           Positioned(
             right: 16,
-            bottom: 330,
+            bottom: 126,
             child: Column(
               children: [
                 _FloatingRoundButton(
@@ -565,20 +596,64 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          DraggableScrollableSheet(
-            initialChildSize: 0.28,
-            minChildSize: 0.22,
-            maxChildSize: 0.58,
-            snap: true,
-            snapSizes: const [0.28, 0.58],
-            builder: (context, controller) {
-              return _buildBottomSheet(
-                controller: controller,
-                route: route,
-                directDistanceKm: directDistanceKm,
-              );
-            },
-          ),
+          if (!_journeyStarted)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 24,
+              child: IgnorePointer(
+                child: _GlassChrome(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.swipe_up_alt_rounded,
+                        color: AppColors.textPrimary,
+                        size: 20,
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Destination сонгоод төв товч дарж төрлөө сонгоно.',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          if (_journeyStarted)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 24,
+              child: _GlassChrome(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Text(
+                  _isSavingTrack
+                      ? 'GPS track-ийг backend руу хадгалж байна.'
+                      : _isRouteLoading
+                      ? 'Маршрут тооцоолж байна.'
+                      : 'Хар route нь зөвлөсөн зам, ногоон route нь таны бодитоор явсан мөр.',
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -626,9 +701,7 @@ class _HomePageState extends State<HomePage> {
                           const SizedBox(height: 2),
                           Text(
                             _journeyStarted
-                                ? (_isTracking
-                                      ? 'Tracking your live movement'
-                                      : 'Preparing trip tracking')
+                                ? 'Trip in progress'
                                 : 'Choose destination with the center pin',
                             style: const TextStyle(
                               color: AppColors.textPrimary,
@@ -656,349 +729,13 @@ class _HomePageState extends State<HomePage> {
                     ? Icons.trip_origin_rounded
                     : Icons.route_outlined,
                 label: _journeyStarted
-                    ? (_isTracking ? 'Live track идэвхтэй' : 'Trip эхэлж байна')
+                    ? 'Аялал эхэлсэн'
                     : 'Очих цэгээ тааруулж байна',
-              ),
-            ),
-            const SizedBox(width: 10),
-            _StatusPill(
-              icon: Icons.traffic_rounded,
-              label: _isTrafficLoading ? 'Traffic...' : 'Traffic overlay',
-              trailing: Switch.adaptive(
-                value: _showTrafficOverlay,
-                onChanged: (value) {
-                  setState(() {
-                    _showTrafficOverlay = value;
-                  });
-                },
               ),
             ),
           ],
         ),
       ],
-    );
-  }
-
-  Widget _buildBottomSheet({
-    required ScrollController controller,
-    required _RouteOption route,
-    required double directDistanceKm,
-  }) {
-    return Container(
-      decoration: const BoxDecoration(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x24000000),
-            blurRadius: 28,
-            offset: Offset(0, -8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.94),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(32),
-              ),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.85)),
-            ),
-            child: ListView(
-              controller: controller,
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-              children: [
-                Center(
-                  child: Container(
-                    width: 42,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: AppColors.stroke,
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _journeyStarted
-                                ? 'Аялал эхэлсэн'
-                                : 'Очих газраа сонго',
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.6,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _journeyStarted
-                                ? 'Явсан зам чинь бодитоор бичигдэж байна. Дуусахад backend руу хадгална.'
-                                : 'Map-ийг хөдөлгөж center pin-ээ тааруулаад дөт замын аяллаа эхлүүлнэ.',
-                            style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 14,
-                              height: 1.45,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: 54,
-                      height: 54,
-                      decoration: BoxDecoration(
-                        color: AppColors.lightSurface,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(Icons.navigation_rounded),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 22),
-                _LocationCard(
-                  icon: Icons.radio_button_checked_rounded,
-                  iconColor: AppColors.primary,
-                  label: 'Эхлэх',
-                  value: _locationLabel(_currentLocation),
-                  helper: _isUsingLiveLocation
-                      ? 'Live location'
-                      : 'Simulator эсвэл fallback байршил',
-                ),
-                const SizedBox(height: 12),
-                _LocationCard(
-                  icon: Icons.place_rounded,
-                  iconColor: AppColors.accent,
-                  label: 'Очих',
-                  value: _locationLabel(_destinationLocation),
-                  helper: _journeyStarted
-                      ? 'Selected destination'
-                      : 'Center pin-ээр сонгогдоно',
-                ),
-                const SizedBox(height: 18),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.lightSurface,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: const Icon(
-                              Icons.alt_route_rounded,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Дөт зам',
-                                  style: TextStyle(
-                                    color: AppColors.textPrimary,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  route.description,
-                                  style: const TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 13,
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text(
-                              '${directDistanceKm.toStringAsFixed(1)} км',
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _SheetStat(
-                              label: 'Route mode',
-                              value: 'Shortest',
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _SheetStat(
-                              label: 'Tracking',
-                              value: _journeyStarted
-                                  ? (_isTracking ? 'Live' : 'Starting')
-                                  : 'Idle',
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _SheetStat(
-                              label: 'Traffic',
-                              value: _showTrafficOverlay ? 'On' : 'Off',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                if (_locationError != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFCE7E5),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          color: AppColors.danger,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _locationError!,
-                            style: const TextStyle(
-                              color: AppColors.danger,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                ],
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: _journeyStarted
-                      ? Column(
-                          key: const ValueKey('journey-started'),
-                          children: [
-                            FilledButton(
-                              onPressed: _isRouteLoading || _isSavingTrack
-                                  ? null
-                                  : _finishJourney,
-                              child: Text(
-                                _isSavingTrack
-                                    ? 'Маршрут хадгалж байна...'
-                                    : _isRouteLoading
-                                    ? 'Маршрут тооцоолж байна...'
-                                    : 'Аяллыг дуусгах',
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton(
-                                onPressed: _isSavingTrack
-                                    ? null
-                                    : _cancelJourney,
-                                child: const Text('Хадгалахгүйгээр цуцлах'),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.visibility_rounded,
-                                  size: 18,
-                                  color: AppColors.textSecondary,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _isSavingTrack
-                                        ? 'GPS track-ийг backend руу хадгалж байна.'
-                                        : _isRouteLoading
-                                        ? 'Дотоод гудамж түлхүү ашиглах маршрутыг хайж байна.'
-                                        : 'Хар route нь зөвлөсөн зам, ногоон route нь таны бодитоор явсан мөр.',
-                                    style: const TextStyle(
-                                      color: AppColors.textSecondary,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        )
-                      : Column(
-                          key: const ValueKey('journey-ready'),
-                          children: [
-                            FilledButton(
-                              onPressed: _startJourney,
-                              child: const Text('Аяллаа эхлүүлэх'),
-                            ),
-                            const SizedBox(height: 12),
-                            const Row(
-                              children: [
-                                Icon(
-                                  Icons.pan_tool_alt_rounded,
-                                  size: 18,
-                                  color: AppColors.textSecondary,
-                                ),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Map-ийг хөдөлгөхөд destination шинэчлэгдэнэ. Journey эхэлсний дараа live track автоматаар бичигдэнэ.',
-                                    style: TextStyle(
-                                      color: AppColors.textSecondary,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -1056,10 +793,91 @@ class _HomePageState extends State<HomePage> {
   }
 
   _RouteOption _buildRouteOption() {
-    return _RouteOption(
+    return _routeOptions.firstWhere(
+      (option) => option.profile == _selectedTransportMode,
+      orElse: () => _routeOptions.first,
+    );
+  }
+
+  List<_RouteOption> get _routeOptions => [
+    _RouteOption(
+      label: 'Машин',
+      shortStat: 'Car',
+      profile: 'driving-car',
+      icon: Icons.directions_car_filled_rounded,
+      description: 'Ердийн автомашины тэнцвэртэй маршрут сонгоно.',
+      fallbackPoints: _buildFallbackRoute(const [
+        [0.00, 0.00],
+        [0.16, 0.18],
+        [0.38, 0.40],
+        [0.66, 0.72],
+        [1.00, 1.00],
+      ]),
+    ),
+    _RouteOption(
+      label: 'Явган',
+      shortStat: 'Walk',
+      profile: 'foot-walking',
+      icon: Icons.directions_walk_rounded,
+      description: 'Явган хүний зам, гарц ашигласан алхалтын маршрут.',
+      fallbackPoints: _buildFallbackRoute(const [
+        [0.00, 0.00],
+        [0.20, 0.15],
+        [0.42, 0.36],
+        [0.72, 0.68],
+        [1.00, 1.00],
+      ]),
+    ),
+    _RouteOption(
+      label: 'Wheelchair',
+      shortStat: 'Access',
+      profile: 'wheelchair',
+      icon: Icons.accessible_forward_rounded,
+      description: 'Налуу, гадаргуу, шатгүй хэсгийг давуу үзнэ.',
+      fallbackPoints: _buildFallbackRoute(const [
+        [0.00, 0.00],
+        [0.15, 0.12],
+        [0.36, 0.32],
+        [0.64, 0.70],
+        [1.00, 1.00],
+      ]),
+    ),
+    _RouteOption(
+      label: 'Том машин',
+      shortStat: 'HGV',
+      profile: 'heavy-vehicle',
+      icon: Icons.local_shipping_rounded,
+      description: 'Том оврын автомашинд боломжтой замыг баримтална.',
+      fallbackPoints: _buildFallbackRoute(const [
+        [0.00, 0.00],
+        [0.12, 0.24],
+        [0.34, 0.48],
+        [0.62, 0.78],
+        [1.00, 1.00],
+      ]),
+    ),
+    _RouteOption(
+      label: 'Хурдан зам',
+      shortStat: 'Fast',
+      profile: 'taxi-fast',
+      icon: Icons.local_taxi_rounded,
+      description:
+          'Төв зам, гол өргөн урсгалаар хамгийн хурдан хүрэх маршрутыг сонгоно.',
+      fallbackPoints: _buildFallbackRoute(const [
+        [0.00, 0.00],
+        [0.18, 0.26],
+        [0.40, 0.52],
+        [0.70, 0.84],
+        [1.00, 1.00],
+      ]),
+    ),
+    _RouteOption(
+      label: 'Дөт зам',
+      shortStat: 'Short',
+      profile: 'driving-shortest',
+      icon: Icons.alt_route_rounded,
       description:
           'Төв замын урсгалд түгжигдэхээс илүү жижиг автомашин замыг давуу үзнэ.',
-      profile: 'driving-shortest',
       fallbackPoints: _buildFallbackRoute(const [
         [0.00, 0.00],
         [0.14, 0.20],
@@ -1067,8 +885,8 @@ class _HomePageState extends State<HomePage> {
         [0.58, 0.76],
         [1.00, 1.00],
       ]),
-    );
-  }
+    ),
+  ];
 
   List<LatLng> _buildFallbackRoute(List<List<double>> fractions) {
     return fractions
@@ -1085,99 +903,21 @@ class _HomePageState extends State<HomePage> {
         .toList();
   }
 
-  List<CircleMarker> _buildTrafficCircles() {
-    return _trafficHotspots
-        .map(
-          (spot) => CircleMarker(
-            point: spot.point,
-            radius: spot.radius,
-            color: spot.color.withValues(alpha: 0.16),
-            borderColor: spot.color.withValues(alpha: 0.72),
-            borderStrokeWidth: 2,
-          ),
-        )
-        .toList();
-  }
-
-  List<_TrafficHotspot> _buildTrafficHotspots(List<ReportItem> reports) {
-    final hotspots = reports
-        .where((report) => report.latitude != 0 && report.longitude != 0)
-        .map(
-          (report) => _TrafficHotspot(
-            point: LatLng(report.latitude, report.longitude),
-            color: _trafficColor(report.type),
-            radius: _trafficRadius(report.type),
-          ),
-        )
-        .toList();
-
-    return hotspots.take(12).toList();
-  }
-
-  List<_TrafficHotspot> _fallbackHotspots() {
-    return const [
-      _TrafficHotspot(
-        point: LatLng(47.9199, 106.9175),
-        color: Colors.green,
-        radius: 28,
-      ),
-      _TrafficHotspot(
-        point: LatLng(47.9238, 106.9227),
-        color: Color(0xFFF39C12),
-        radius: 34,
-      ),
-      _TrafficHotspot(
-        point: LatLng(47.9165, 106.9318),
-        color: Colors.red,
-        radius: 38,
-      ),
-      _TrafficHotspot(
-        point: LatLng(47.9267, 106.9354),
-        color: Color(0xFF7A0019),
-        radius: 44,
-      ),
-    ];
-  }
-
-  Color _trafficColor(String type) {
-    switch (type) {
-      case 'blocked-road':
-        return const Color(0xFF7A0019);
-      case 'accident':
-        return Colors.red;
-      case 'traffic':
-        return const Color(0xFFF39C12);
-      case 'pothole':
-      default:
-        return Colors.green;
-    }
-  }
-
   Color _savedTrackColor(String mode) {
     switch (mode) {
       case 'wheelchair':
         return const Color(0xFF7E57C2).withValues(alpha: 0.48);
+      case 'foot-walking':
       case 'foot':
       case 'walk':
         return AppColors.success.withValues(alpha: 0.36);
       case 'heavy':
+      case 'heavy-vehicle':
         return AppColors.warning.withValues(alpha: 0.38);
+      case 'taxi-fast':
+        return const Color(0xFFFFC107).withValues(alpha: 0.42);
       default:
         return AppColors.routeBlue.withValues(alpha: 0.22);
-    }
-  }
-
-  double _trafficRadius(String type) {
-    switch (type) {
-      case 'blocked-road':
-        return 44;
-      case 'accident':
-        return 38;
-      case 'traffic':
-        return 34;
-      case 'pothole':
-      default:
-        return 28;
     }
   }
 
@@ -1187,34 +927,24 @@ class _HomePageState extends State<HomePage> {
       location.longitude + _defaultDestinationOffset[1],
     );
   }
-
-  String _locationLabel(LatLng point) {
-    return '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
-  }
 }
 
 class _RouteOption {
   const _RouteOption({
+    required this.label,
+    required this.shortStat,
     required this.description,
     required this.profile,
+    required this.icon,
     required this.fallbackPoints,
   });
 
+  final String label;
+  final String shortStat;
   final String description;
   final String profile;
+  final IconData icon;
   final List<LatLng> fallbackPoints;
-}
-
-class _TrafficHotspot {
-  const _TrafficHotspot({
-    required this.point,
-    required this.color,
-    required this.radius,
-  });
-
-  final LatLng point;
-  final Color color;
-  final double radius;
 }
 
 class _FloatingRoundButton extends StatelessWidget {
@@ -1283,11 +1013,10 @@ class _GlassChrome extends StatelessWidget {
 }
 
 class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.icon, required this.label, this.trailing});
+  const _StatusPill({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1309,164 +1038,7 @@ class _StatusPill extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
         ],
-      ),
-    );
-  }
-}
-
-class _LocationCard extends StatelessWidget {
-  const _LocationCard({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-    required this.helper,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final String value;
-  final String helper;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.stroke),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(icon, color: iconColor),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  helper,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SheetStat extends StatelessWidget {
-  const _SheetStat({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LiveDot extends StatefulWidget {
-  const _LiveDot();
-
-  @override
-  State<_LiveDot> createState() => _LiveDotState();
-}
-
-class _LiveDotState extends State<_LiveDot>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: Tween<double>(begin: 0.35, end: 1).animate(_controller),
-      child: Container(
-        width: 9,
-        height: 9,
-        decoration: const BoxDecoration(
-          color: AppColors.accent,
-          shape: BoxShape.circle,
-        ),
       ),
     );
   }
