@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
-
 import '../theme/app_colors.dart';
+import 'points_store.dart';
 
-class RewardsPage extends StatelessWidget {
+class RewardsPage extends StatefulWidget {
   const RewardsPage({super.key});
 
-  static const _activities = [
-    _Activity('Мөс / цас', 'Сүхбаатар дүүрэг', '+50', '10:24'),
-    _Activity('Замын засвар', 'Хан-Уул дүүрэг', '+50', '09:15'),
-    _Activity('Замын осол', 'Баянзүрх дүүрэг', '+50', '08:52'),
-    _Activity('Үерт зам', 'Чингэлтэй дүүрэг', '+50', '07:30'),
-  ];
+  @override
+  State<RewardsPage> createState() => _RewardsPageState();
+}
+
+class _RewardsPageState extends State<RewardsPage> {
+  final _store = PointsStore();
 
   static const _badges = [
     _Badge(Icons.local_fire_department_rounded, 'Идэвхтэй', AppColors.danger),
@@ -19,8 +19,38 @@ class RewardsPage extends StatelessWidget {
     _Badge(Icons.workspace_premium_rounded, 'Pro', AppColors.routeBlue),
   ];
 
+  static const int _nextTier = 2000;
+
+  @override
+  void initState() {
+    super.initState();
+    _store.addListener(_onUpdate);
+  }
+
+  @override
+  void dispose() {
+    _store.removeListener(_onUpdate);
+    super.dispose();
+  }
+
+  void _onUpdate() => setState(() {});
+
+  String _fmt(int n) {
+    final s = n.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final total = _store.total;
+    final activities = _store.activities;
+    final progress = (total / _nextTier).clamp(0.0, 1.0);
+
     return Scaffold(
       backgroundColor: AppColors.canvas,
       body: SafeArea(
@@ -44,6 +74,8 @@ class RewardsPage extends StatelessWidget {
                 style: TextStyle(color: AppColors.textSecondary, height: 1.45),
               ),
               const SizedBox(height: 20),
+
+              // 🏆 Оноо карт
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(24),
@@ -61,14 +93,11 @@ class RewardsPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Нийт оноо',
-                      style: TextStyle(color: Colors.white70),
-                    ),
+                    const Text('Нийт оноо', style: TextStyle(color: Colors.white70)),
                     const SizedBox(height: 10),
-                    const Text(
-                      '1,250',
-                      style: TextStyle(
+                    Text(
+                      _fmt(total),
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 46,
                         fontWeight: FontWeight.w800,
@@ -79,26 +108,20 @@ class RewardsPage extends StatelessWidget {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(999),
                       child: LinearProgressIndicator(
-                        value: 0.62,
+                        value: progress,
                         minHeight: 8,
                         backgroundColor: Colors.white24,
                         color: AppColors.gold,
                       ),
                     ),
                     const SizedBox(height: 10),
-                    const Row(
+                    Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
+                        const Text('Next tier', style: TextStyle(color: Colors.white70)),
                         Text(
-                          'Next tier',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                        Text(
-                          '1,250 / 2,000',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          '$total / $_nextTier',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
                         ),
                       ],
                     ),
@@ -106,28 +129,41 @@ class RewardsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // Badges
               Container(
                 padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(28),
-                ),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: _badges.map(_buildBadge).toList(),
                 ),
               ),
               const SizedBox(height: 20),
+
               const Text(
                 'Recent activity',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
-              ..._activities.map(_buildActivity),
+
+              if (activities.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'Одоохондоо мэдээлэл байхгүй байна.\nМэдээлэл илгээснээр энд харагдана.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.textSecondary, height: 1.5),
+                    ),
+                  ),
+                )
+              else
+                ...activities.map(_buildActivity),
             ],
           ),
         ),
@@ -135,108 +171,76 @@ class RewardsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildBadge(_Badge badge) {
-    return Column(
-      children: [
-        Container(
-          width: 58,
-          height: 58,
-          decoration: BoxDecoration(
-            color: badge.color.withValues(alpha: 0.12),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(badge.icon, color: badge.color, size: 28),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          badge.label,
-          style: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActivity(_Activity activity) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
+  Widget _buildBadge(_Badge b) => Column(
         children: [
           Container(
-            width: 46,
-            height: 46,
+            width: 58,
+            height: 58,
             decoration: BoxDecoration(
-              color: AppColors.lightSurface,
-              borderRadius: BorderRadius.circular(16),
+              color: b.color.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.route_rounded),
+            child: Icon(b.icon, color: b.color, size: 28),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  activity.title,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  activity.location,
-                  style: const TextStyle(color: AppColors.textSecondary),
-                ),
-              ],
+          const SizedBox(height: 8),
+          Text(
+            b.label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                activity.points,
-                style: const TextStyle(
-                  color: AppColors.accent,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                activity.time,
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-            ],
           ),
         ],
-      ),
-    );
-  }
-}
+      );
 
-class _Activity {
-  const _Activity(this.title, this.location, this.points, this.time);
-
-  final String title;
-  final String location;
-  final String points;
-  final String time;
+  Widget _buildActivity(ActivityEntry a) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: AppColors.lightSurface,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.route_rounded),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    a.title,
+                    style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(a.location, style: const TextStyle(color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '+${a.points}',
+                  style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(a.time, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              ],
+            ),
+          ],
+        ),
+      );
 }
 
 class _Badge {
   const _Badge(this.icon, this.label, this.color);
-
   final IconData icon;
   final String label;
   final Color color;
